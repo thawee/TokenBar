@@ -12,6 +12,8 @@ It was built as a lightweight alternative to [Token Monitor](https://github.com/
 
 **Menu bar.** The icon shows the most urgent 5-hour limit. Click it for every tool's windows, reset times and errors, a Refresh button and the Customize section.
 
+**Open at login.** On by default from the first launch. Turn it off with the "Open at login" switch in the popover. It uses the system login-item service (`SMAppService`), so it also appears in System Settings > General > Login Items.
+
 **Side dock.** A floating rail on the left or right screen edge, above all apps and Spaces:
 
 - One ring per item: system metrics on top, AI tools below.
@@ -62,13 +64,19 @@ System metrics are sampled only while the dock is visible and at least one metri
 ## Build and run
 
 ```sh
+./scripts/install.sh            # build, copy to /Applications (or ~/Applications), launch
+```
+
+For development:
+
+```sh
 swift test                      # 22 unit tests: parsers, store, system math, SMC decoding
 LIVE=1 swift test --filter live # print what each provider and the sampler return on this machine
 ./scripts/bundle.sh             # builds build/TokenBar.app (release, ad-hoc signed)
 open build/TokenBar.app
 ```
 
-To start it at login, add `build/TokenBar.app` under System Settings > General > Login Items.
+Install with `install.sh` before relying on Open at login. The login item points at the app's location, and `bundle.sh` deletes and recreates `build/TokenBar.app` on every build.
 
 ## Project layout
 
@@ -87,9 +95,11 @@ Sources/
     DockController.swift  floating panel, drag and snap, hover tracking, hover card
     DockView.swift     rail, rings, hover cards
     DockSettings.swift persisted settings, sizes, used/remaining
+    LoginItem.swift    open at login (SMAppService)
 Tests/TokenBarCoreTests/   tests and sanitized response fixtures
 Resources/Icons/       tool logos (see NOTICE.md)
 scripts/bundle.sh      release build to .app
+scripts/install.sh     bundle, copy to Applications, launch
 docs/DESIGN.md         design and decisions
 ```
 

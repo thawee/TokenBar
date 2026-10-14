@@ -71,7 +71,12 @@ func liveSystemSample() async throws {
     let store = SystemStore(interval: .milliseconds(600))
     store.setRunning(true)
     #expect(store.isRunning)
-    try await Task.sleep(for: .milliseconds(800))
+    // The first sample also resolves the SMC keys (a few hundred ms), so wait for it
+    // rather than assuming a fixed delay.
+    let deadline = ContinuousClock.now + .seconds(5)
+    while store.snapshot == nil, ContinuousClock.now < deadline {
+        try await Task.sleep(for: .milliseconds(50))
+    }
     let first = try #require(store.snapshot)
     #expect(store.availableMetrics.contains(.cpu))
 

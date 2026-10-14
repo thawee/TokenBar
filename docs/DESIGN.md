@@ -139,6 +139,8 @@ The card is a second, click-through panel (`ignoresMouseEvents`), so it never ta
 
 ## 6. Settings
 
+**Open at login** uses `SMAppService.mainApp`. The system registration is the source of truth: the toggle reads `status` instead of a saved flag, so it reflects changes made in System Settings. The first launch registers once (tracked by `loginItem.configured`), and after that only the toggle changes it, so turning it off sticks. `requiresApproval` shows a link to System Settings > Login Items. Verified on macOS 26: an ad-hoc-signed build in `~/Applications` registered as `enabled` with no prompt.
+
 `DockSettings` is backed by UserDefaults (`dock.size`, `dock.tools`, `dock.metrics`, `limits.display`, plus `dock.visible`, `dock.side`, `dock.center` and `dock.display`). The enabled tools feed `LimitsStore.enabled`, so turning a tool off also stops it being fetched.
 
 ## 7. Decisions and rejected alternatives
@@ -190,7 +192,6 @@ The first minute after launch costs more (about 1 s of CPU), for the initial fet
 
 ## 11. Future work
 
-- A launch-at-login toggle (`SMAppService`).
 - Gemini CLI quotas.
 - Optional token and cost totals for today (the "TODAY" header in the original mockup).
 - Per-process GPU attribution, to name the app behind sustained GPU load.

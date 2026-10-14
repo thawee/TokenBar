@@ -6,6 +6,7 @@ struct TokenBarApp: App {
     @State private var store: LimitsStore
     @State private var settings: DockSettings
     @State private var dock: DockController
+    @State private var loginItem = LoginItem()
     @AppStorage("dock.visible") private var dockVisible = true
 
     init() {
@@ -19,13 +20,14 @@ struct TokenBarApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            LimitsPanel(store: store, settings: settings, dockVisible: $dockVisible)
+            LimitsPanel(store: store, settings: settings, loginItem: loginItem, dockVisible: $dockVisible)
         } label: {
             // The label lives as long as the app, unlike the popover content.
             MenuBarLabel(percent: settings.limitDisplay.value(store.headlinePercent))
                 .task {
                     store.start()
                     if dockVisible { dock.show() }
+                    loginItem.enableOnFirstLaunch()
                 }
                 .onChange(of: dockVisible) { _, visible in
                     visible ? dock.show() : dock.hide()
@@ -52,6 +54,7 @@ struct MenuBarLabel: View {
 struct LimitsPanel: View {
     let store: LimitsStore
     let settings: DockSettings
+    let loginItem: LoginItem
     @Binding var dockVisible: Bool
     @AppStorage("panel.customizeExpanded") private var customizeExpanded = false
 
@@ -71,6 +74,7 @@ struct LimitsPanel: View {
             Toggle("Show side dock", isOn: $dockVisible)
                 .toggleStyle(.switch)
                 .controlSize(.mini)
+            LoginItemToggle(loginItem: loginItem)
             DisclosureGroup("Customize", isExpanded: $customizeExpanded) {
                 CustomizeSection(settings: settings).padding(.top, 6)
             }
