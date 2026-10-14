@@ -160,7 +160,7 @@ The card is a second, click-through panel (`ignoresMouseEvents`), so it never ta
 
 | Decision | Alternative rejected | Why |
 |---|---|---|
-| Native SwiftUI + AppKit | Electron (as in Token Monitor) | The size and memory goals. Measured: 588 KB bundle, about 23 MB of memory. |
+| Native SwiftUI + AppKit | Electron (as in Token Monitor) | The size and memory goals. Measured: 644 KB bundle, 23 to 47 MB of memory. |
 | Read the Claude token, never refresh it | Refresh it with `console.anthropic.com/v1/oauth/token` | Refreshing can rotate the token Claude Code holds and sign it out. On macOS, Token Monitor refreshes but does not write back to the Keychain. |
 | `/usr/bin/security` for the Keychain read | `SecItemCopyMatching` | The item's access list already trusts `security`. A native read from an ad-hoc-signed app prompts again after every rebuild. |
 | Codex from local session logs | `chatgpt.com/backend-api/wham/usage` | The same numbers with no network and no credentials. |
@@ -179,8 +179,8 @@ Measured on an M3 Pro (36 GB) running macOS 26:
 
 | | Value |
 |---|---|
-| Bundle size | 588 KB |
-| Memory (physical footprint) | 19 MB menu bar only; about 23 MB with the dock and all metrics (other runs read up to 42 MB) |
+| Bundle size | 644 KB |
+| Memory (physical footprint) | 19 MB menu bar only; 23 to 47 MB with the dock and all metrics, varying between runs. Flat at 47 MB over 4 minutes in the latest run, so not growing. |
 | Steady CPU with the dock and all metrics | 0.29 s per 60 s, about 0.5% |
 | First sample | 0.32 s, once, off the main thread (SMC key walk for the GPU keys) |
 | Steady sample | 0.03 ms |

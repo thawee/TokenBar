@@ -4,7 +4,7 @@ A lightweight native macOS menu bar app and side dock that shows how much of you
 
 - **AI plan limits** for Claude Code, Codex, GitHub Copilot and Antigravity: 5-hour, weekly and monthly windows with reset times.
 - **System load** for running local models: CPU, memory, GPU and CPU/GPU die temperature.
-- **Native and small**: SwiftUI + AppKit, no dependencies, about 590 KB on disk, about 23 MB of memory and about 0.5% CPU while sampling.
+- **Native and small**: SwiftUI + AppKit, no dependencies, about 640 KB on disk, 23 to 47 MB of memory and about 0.5% CPU while sampling.
 
 It was built as a lightweight alternative to [Token Monitor](https://github.com/Javis603/token-monitor), covering only plan limits and system load.
 
