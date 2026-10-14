@@ -98,3 +98,24 @@ private func reading(_ percent: Double, resetsAt: Date? = nil) -> LimitsReading 
     #expect(claude.calls == 1)
     #expect(store.visible == [.claude])
 }
+
+@MainActor @Test func mostUrgentUsesEachToolsHeadlineWindow() async throws {
+    let monthly = LimitsReading(plan: nil, windows: [
+        LimitWindow(label: "Premium", kind: .monthly, usedPercent: 80, resetsAt: nil),
+    ], observedAt: Date())
+    let session = LimitsReading(plan: nil, windows: [
+        LimitWindow(label: "Weekly", kind: .weekly, usedPercent: 99, resetsAt: nil),
+        LimitWindow(label: "5-hour", kind: .session, usedPercent: 40, resetsAt: nil),
+    ], observedAt: Date())
+    let store = LimitsStore(providers: [
+        FakeProvider(.copilot, [.success(monthly)]),
+        FakeProvider(.claude, [.success(session)]),
+    ])
+    await store.refresh()
+    // Claude's 5-hour (40) stands for Claude, not its weekly 99; Copilot has only monthly.
+    let urgent = try #require(store.mostUrgent())
+    #expect(urgent.id == .copilot)
+    #expect(urgent.usedPercent == 80)
+    #expect(session.headlineWindow?.label == "5-hour")
+    #expect(monthly.headlineWindow?.label == "Premium")
+}

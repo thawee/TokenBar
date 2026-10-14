@@ -45,6 +45,15 @@ extension ProviderID {
         return image
     }
 
+    /// The logo as a 16 pt template image for the menu bar, so it follows the menu bar's
+    /// light or dark appearance. Antigravity's multicolor logo becomes its silhouette.
+    @MainActor var menuBarImage: NSImage? {
+        guard let logo, let image = logo.copy() as? NSImage else { return nil }
+        image.size = NSSize(width: 16, height: 16)
+        image.isTemplate = true
+        return image
+    }
+
     var tint: Color {
         switch self {
         case .claude: Color(red: 0.85, green: 0.47, blue: 0.34)
@@ -157,7 +166,7 @@ struct DockView: View {
             if !store.visible.isEmpty {
                 header(settings.limitDisplay == .used ? "AI USED" : "AI LEFT")
                 ForEach(store.visible) { id in
-                    let shown = settings.limitDisplay.value(headlineWindow(store.states[id])?.usedPercent)
+                    let shown = settings.limitDisplay.value(store.states[id]?.reading?.headlineWindow?.usedPercent)
                     ring(.provider(id)) {
                         RingGauge(m: m, tint: id.tint, value: shown,
                                   fraction: (shown ?? 0) / 100,
@@ -227,12 +236,6 @@ struct ProviderLogo: View {
         }
         .foregroundStyle(.white.opacity(0.92))
     }
-}
-
-/// The 5-hour window when the tool has one, otherwise its first window (Copilot is monthly).
-func headlineWindow(_ state: ProviderState?) -> LimitWindow? {
-    let windows = state?.reading?.windows ?? []
-    return windows.first { $0.kind == .session } ?? windows.first
 }
 
 /// "Resets in 1h 23m" within a day, otherwise "Resets Tue 07:00".

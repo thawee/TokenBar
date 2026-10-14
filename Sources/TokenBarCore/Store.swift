@@ -44,16 +44,21 @@ public final class LimitsStore {
         }
     }
 
-    /// Highest 5-hour usage across providers, for the menu bar label. Windows whose
-    /// reset time has passed are skipped: their percentage is from before the reset.
-    public var headlinePercent: Double? {
-        let now = Date()
-        return states.values
-            .compactMap(\.reading)
-            .flatMap(\.windows)
-            .filter { $0.kind == .session && ($0.resetsAt.map { $0 > now } ?? true) }
-            .compactMap(\.usedPercent)
-            .max()
+    /// The most urgent tool's usage percentage.
+    public var headlinePercent: Double? { mostUrgent()?.usedPercent }
+
+    /// The tool closest to its limit, by each tool's headline window. Windows whose
+    /// reset has passed are skipped: their percentage is from before the reset.
+    public func mostUrgent(now: Date = Date()) -> (id: ProviderID, usedPercent: Double)? {
+        visible
+            .compactMap { id -> (id: ProviderID, usedPercent: Double)? in
+                guard let window = states[id]?.reading?.headlineWindow,
+                      let used = window.usedPercent,
+                      window.resetsAt.map({ $0 > now }) ?? true
+                else { return nil }
+                return (id, used)
+            }
+            .max { $0.usedPercent < $1.usedPercent }
     }
 
     /// Seconds before a provider is fetched again. A transient failure retries after a

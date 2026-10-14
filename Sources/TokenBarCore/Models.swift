@@ -47,6 +47,14 @@ public struct LimitsReading: Sendable, Equatable {
     }
 }
 
+extension LimitsReading {
+    /// The window that stands for the tool: its 5-hour window, or its first one when it
+    /// has none (Copilot only has a monthly quota).
+    public var headlineWindow: LimitWindow? {
+        windows.first { $0.kind == .session } ?? windows.first
+    }
+}
+
 public enum ProviderError: Error, Sendable, Equatable {
     /// Tool not installed or not signed in. Not an error from the user's point of view.
     case notConfigured(String)

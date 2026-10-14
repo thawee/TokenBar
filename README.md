@@ -10,7 +10,7 @@ It was built as a lightweight alternative to [Token Monitor](https://github.com/
 
 ## Features
 
-**Menu bar.** The icon shows the most urgent 5-hour limit. Click it for every tool's windows, reset times and errors, a Refresh button and the Customize section.
+**Menu bar.** By default it shows the logo and number of the tool closest to its limit (each tool counts its 5-hour window, or its monthly one if it has no 5-hour window). Customize > Menu bar can pin one tool instead, or show only the gauge icon until any limit passes 70% used. Click it for every tool's windows, reset times and errors, a Refresh button and the Customize section.
 
 **Open at login.** On by default from the first launch. Turn it off with the "Open at login" switch in the popover. It uses the system login-item service (`SMAppService`), so it also appears in System Settings > General > Login Items.
 
@@ -28,6 +28,7 @@ It was built as a lightweight alternative to [Token Monitor](https://github.com/
 | Show side dock | on / off |
 | Dock size | Normal / Mini |
 | AI limits | Used / Remaining. Applies to the dock, cards, popover and menu bar. Red at 90% used or 10% left. |
+| Menu bar | Most urgent tool / a specific tool / Icon only, number from 70% |
 | AI tools | Claude Code, Codex, GitHub Copilot, Antigravity. A tool you turn off is never checked: no Keychain read, no network call. |
 | System | CPU, Memory, GPU, Temperature |
 
@@ -70,7 +71,7 @@ System metrics are sampled only while the dock is visible and at least one metri
 For development:
 
 ```sh
-swift test                      # 22 unit tests: parsers, store, system math, SMC decoding
+swift test                      # 23 unit tests: parsers, store, system math, SMC decoding
 LIVE=1 swift test --filter live # print what each provider and the sampler return on this machine
 ./scripts/bundle.sh             # builds build/TokenBar.app (release, ad-hoc signed)
 open build/TokenBar.app
@@ -92,6 +93,7 @@ Sources/
     SMC.swift          AppleSMC reader and die-temperature selection
   TokenBar/            the app
     TokenBarApp.swift  menu bar extra, popover, Customize section
+    MenuBarLabel.swift menu bar logo and number for the chosen mode
     DockController.swift  floating panel, drag and snap, hover tracking, hover card
     DockView.swift     rail, rings, hover cards
     DockSettings.swift persisted settings, sizes, used/remaining

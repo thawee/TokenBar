@@ -23,7 +23,7 @@ struct TokenBarApp: App {
             LimitsPanel(store: store, settings: settings, loginItem: loginItem, dockVisible: $dockVisible)
         } label: {
             // The label lives as long as the app, unlike the popover content.
-            MenuBarLabel(percent: settings.limitDisplay.value(store.headlinePercent))
+            MenuBarLabel(store: store, settings: settings)
                 .task {
                     store.start()
                     if dockVisible { dock.show() }
@@ -37,17 +37,6 @@ struct TokenBarApp: App {
                 }
         }
         .menuBarExtraStyle(.window)
-    }
-}
-
-struct MenuBarLabel: View {
-    let percent: Double?
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "gauge.with.dots.needle.33percent")
-            if let percent { Text("\(Int(percent.rounded()))%").monospacedDigit() }
-        }
     }
 }
 
@@ -170,6 +159,16 @@ struct CustomizeSection: View {
                 Text("Remaining").tag(LimitDisplay.remaining)
             }
             .pickerStyle(.segmented)
+            Picker("Menu bar", selection: $settings.menuBar) {
+                Text("Most urgent tool").tag(MenuBarMode.urgent)
+                Divider()
+                ForEach(ProviderID.allCases) { id in
+                    Text(id.displayName).tag(MenuBarMode.tool(id))
+                }
+                Divider()
+                Text("Icon only, number from \(Int(MenuBarMode.quietThreshold))%").tag(MenuBarMode.iconOnly)
+            }
+            .pickerStyle(.menu)
             group("AI tools", note: "Turned-off tools are not checked at all.") {
                 ForEach(ProviderID.allCases) { id in
                     Toggle(id.displayName, isOn: settings.binding(for: id))

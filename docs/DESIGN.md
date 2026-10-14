@@ -81,7 +81,11 @@ Response fields, as verified against live data on 2026-10-14:
 
 ### Display
 
-The used percentage is stored. `LimitDisplay` converts it to "used" or "left" in one place, so the dock, card, popover and menu bar always agree. The alert threshold is symmetric: 90% used or 10% left. The headline is the highest 5-hour usage, skipping windows whose reset time has passed.
+The used percentage is stored. `LimitDisplay` converts it to "used" or "left" in one place, so the dock, card, popover and menu bar always agree. The alert threshold is symmetric: 90% used or 10% left.
+
+Each tool is represented by its headline window (`LimitsReading.headlineWindow`): the 5-hour window, or its first window if it has none, as with Copilot's monthly quota. The dock rings and the menu bar both use it. `LimitsStore.mostUrgent()` picks the visible tool with the highest headline usage, skipping windows whose reset time has passed.
+
+The menu bar (`MenuBarMode`) shows the most urgent tool's logo and number by default, a pinned tool, or just the gauge icon until a limit passes 70% used. Logos are drawn as 16 pt template images, so they follow the menu bar's light or dark appearance. Antigravity's multicolor logo becomes a silhouette. The number is not colored red: text color in a SwiftUI menu bar label could not be verified here.
 
 ## 4. System metrics
 
@@ -141,7 +145,7 @@ The card is a second, click-through panel (`ignoresMouseEvents`), so it never ta
 
 **Open at login** uses `SMAppService.mainApp`. The system registration is the source of truth: the toggle reads `status` instead of a saved flag, so it reflects changes made in System Settings. The first launch registers once (tracked by `loginItem.configured`), and after that only the toggle changes it, so turning it off sticks. `requiresApproval` shows a link to System Settings > Login Items. Verified on macOS 26: an ad-hoc-signed build in `~/Applications` registered as `enabled` with no prompt.
 
-`DockSettings` is backed by UserDefaults (`dock.size`, `dock.tools`, `dock.metrics`, `limits.display`, plus `dock.visible`, `dock.side`, `dock.center` and `dock.display`). The enabled tools feed `LimitsStore.enabled`, so turning a tool off also stops it being fetched.
+`DockSettings` is backed by UserDefaults (`dock.size`, `dock.tools`, `dock.metrics`, `limits.display`, `menubar.mode`, plus `dock.visible`, `dock.side`, `dock.center` and `dock.display`). The enabled tools feed `LimitsStore.enabled`, so turning a tool off also stops it being fetched.
 
 ## 7. Decisions and rejected alternatives
 
@@ -176,7 +180,7 @@ The first minute after launch costs more (about 1 s of CPU), for the initial fet
 
 ## 9. Testing
 
-- **Unit tests** (`swift test`, 22): the parsers for all four tools against fixtures, Codex reset handling, ISO dates with microseconds, store intervals, retry after failure, the force floor, enabled tools, headline staleness, CPU tick math, the memory formula, SMC struct layout and decoders, and sampler stop.
+- **Unit tests** (`swift test`, 23): the parsers for all four tools against fixtures, Codex reset handling, ISO dates with microseconds, store intervals, retry after failure, the force floor, enabled tools, headline staleness, CPU tick math, the memory formula, SMC struct layout and decoders, and sampler stop.
 - **Live tests** (`LIVE=1`): call the real providers and sampler on this machine, printing values, never tokens.
 - **Visual checks:** the dock and cards were rendered off-screen with `ImageRenderer` (both sizes, both sides, used and remaining).
 - **Not automated:** real pointer hover and drag, because the development terminal has no Accessibility permission to send synthetic mouse events. A temporary debug hook confirmed the hover hit-testing and the card placement in the running app.

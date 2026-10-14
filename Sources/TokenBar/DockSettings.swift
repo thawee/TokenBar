@@ -33,6 +33,36 @@ enum LimitDisplay: String, CaseIterable, Identifiable {
     var word: String { self == .used ? "used" : "left" }
 }
 
+/// What the menu bar item shows.
+enum MenuBarMode: Hashable {
+    /// The tool closest to its limit: its logo and number.
+    case urgent
+    /// Always this tool.
+    case tool(ProviderID)
+    /// Just the gauge until a limit passes `quietThreshold`, then like `urgent`.
+    case iconOnly
+
+    static let quietThreshold: Double = 70
+
+    var rawValue: String {
+        switch self {
+        case .urgent: "urgent"
+        case .tool(let id): "tool." + id.rawValue
+        case .iconOnly: "icon"
+        }
+    }
+
+    init?(rawValue: String) {
+        switch rawValue {
+        case "urgent": self = .urgent
+        case "icon": self = .iconOnly
+        default:
+            guard rawValue.hasPrefix("tool."), let id = ProviderID(rawValue: String(rawValue.dropFirst(5))) else { return nil }
+            self = .tool(id)
+        }
+    }
+}
+
 /// Every size-dependent number of the rail, so mini and normal share one layout.
 struct DockMetrics {
     let width, ring, line, logo, font, spacing, flare, radius: CGFloat
@@ -72,10 +102,14 @@ final class DockSettings {
     var limitDisplay: LimitDisplay {
         didSet { defaults.set(limitDisplay.rawValue, forKey: "limits.display") }
     }
+    var menuBar: MenuBarMode {
+        didSet { defaults.set(menuBar.rawValue, forKey: "menubar.mode") }
+    }
 
     init() {
         size = DockSize(rawValue: defaults.string(forKey: "dock.size") ?? "") ?? .normal
         limitDisplay = LimitDisplay(rawValue: defaults.string(forKey: "limits.display") ?? "") ?? .used
+        menuBar = MenuBarMode(rawValue: defaults.string(forKey: "menubar.mode") ?? "") ?? .urgent
         tools = (defaults.stringArray(forKey: "dock.tools")).map { Set($0.compactMap(ProviderID.init)) }
             ?? Set(ProviderID.allCases)
         metrics = (defaults.stringArray(forKey: "dock.metrics")).map { Set($0.compactMap(SystemMetric.init)) }
