@@ -127,7 +127,7 @@ The SMC is read through the `AppleSMC` user client (selector 2), which needs no 
 
 - A borderless, `.nonactivatingPanel` `NSPanel` at `.statusBar` level, with `.canJoinAllSpaces`, `.fullScreenAuxiliary`, `.stationary` and `.ignoresCycle`. It floats over full-screen apps and never takes focus.
 - The rail shape (`DockShape`) is a rounded body with concave fillets where it meets the screen edge, drawn for the right edge and mirrored for the left.
-- Size comes from `DockMetrics`: Normal is 76 pt wide with 42 pt rings and headings; Mini is 50 pt with 30 pt rings and no headings. Height comes from the SwiftUI content (`fittingSize`, measured after `layoutSubtreeIfNeeded`).
+- Size comes from one scale factor (`DockScale`, 0.6 to 1.0, default 0.85). Every dimension in `DockMetrics` is derived from it: width (46 to 76 pt), ring, stroke, logo, text, spacing, edge fillet and corner radius. Section headings show from 0.8 up. This replaced two fixed sizes (Normal 76 pt, Mini 50 pt): on a real screen one felt too big and the other too small. Height comes from the SwiftUI content (`fittingSize`, measured after `layoutSubtreeIfNeeded`).
 - The panel relayouts when the visible tools, the size, the enabled metrics or the available metrics change, when the screen configuration changes, and when ring frames change after SwiftUI has applied an update.
 
 ### Drag and snap
@@ -154,7 +154,7 @@ The card is a second, click-through panel (`ignoresMouseEvents`), so it never ta
 
 **Open at login** uses `SMAppService.mainApp`. The system registration is the source of truth: the toggle reads `status` instead of a saved flag, so it reflects changes made in System Settings. The first launch registers once (tracked by `loginItem.configured`), and after that only the toggle changes it, so turning it off sticks. `requiresApproval` shows a link to System Settings > Login Items. Verified on macOS 26: an ad-hoc-signed build in `~/Applications` registered as `enabled` with no prompt.
 
-`DockSettings` is backed by UserDefaults (`dock.size`, `dock.tools`, `dock.metrics`, `limits.display`, `menubar.mode`, plus `dock.visible`, `dock.side`, `dock.center` and `dock.display`). The enabled tools feed `LimitsStore.enabled`, so turning a tool off also stops it being fetched.
+`DockSettings` is backed by UserDefaults (`dock.scale`, `dock.tools`, `dock.metrics`, `limits.display`, `menubar.mode`, plus `dock.visible`, `dock.side`, `dock.center` and `dock.display`). The enabled tools feed `LimitsStore.enabled`, so turning a tool off also stops it being fetched.
 
 ## 7. Decisions and rejected alternatives
 

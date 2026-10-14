@@ -1,16 +1,22 @@
 import SwiftUI
 import TokenBarCore
 
-enum DockSize: String, CaseIterable, Identifiable {
-    case normal, mini
+/// The rail's size as one scale factor; every dimension follows it, so any size
+/// between the smallest and largest keeps the same proportions.
+enum DockScale {
+    static let range: ClosedRange<Double> = 0.6...1.0
+    static let step = 0.05
+    static let standard = 0.85
+    /// Below this the section headings no longer fit and are hidden.
+    static let headingsFrom = 0.8
 
-    var id: String { rawValue }
-
-    var metrics: DockMetrics {
-        switch self {
-        case .normal: DockMetrics(width: 76, ring: 42, line: 4, logo: 20, font: 12, spacing: 14, flare: 18, radius: 14, headers: true)
-        case .mini: DockMetrics(width: 50, ring: 30, line: 3, logo: 14, font: 10, spacing: 9, flare: 12, radius: 10, headers: false)
-        }
+    static func metrics(_ scale: Double) -> DockMetrics {
+        let s = CGFloat(min(max(scale, range.lowerBound), range.upperBound))
+        return DockMetrics(
+            width: (76 * s).rounded(), ring: (42 * s).rounded(), line: max(2.5, 4 * s),
+            logo: (20 * s).rounded(), font: max(9, (12 * s).rounded()), spacing: (14 * s).rounded(),
+            flare: (18 * s).rounded(), radius: (14 * s).rounded(), headers: scale >= headingsFrom
+        )
     }
 }
 
@@ -88,9 +94,11 @@ enum DockItem: Hashable, Identifiable {
 final class DockSettings {
     @ObservationIgnored private let defaults = UserDefaults.standard
 
-    var size: DockSize {
-        didSet { defaults.set(size.rawValue, forKey: "dock.size") }
+    /// See `DockScale`; 1.0 is the original Normal size, 0.66 about the old Mini.
+    var scale: Double {
+        didSet { defaults.set(scale, forKey: "dock.scale") }
     }
+    var dockMetrics: DockMetrics { DockScale.metrics(scale) }
     /// Disabled tools are not fetched at all, so this also applies to the menu bar.
     var tools: Set<ProviderID> {
         didSet { defaults.set(tools.map(\.rawValue).sorted(), forKey: "dock.tools") }
@@ -107,7 +115,7 @@ final class DockSettings {
     }
 
     init() {
-        size = DockSize(rawValue: defaults.string(forKey: "dock.size") ?? "") ?? .normal
+        scale = defaults.object(forKey: "dock.scale") as? Double ?? DockScale.standard
         limitDisplay = LimitDisplay(rawValue: defaults.string(forKey: "limits.display") ?? "") ?? .used
         menuBar = MenuBarMode(rawValue: defaults.string(forKey: "menubar.mode") ?? "") ?? .urgent
         tools = (defaults.stringArray(forKey: "dock.tools")).map { Set($0.compactMap(ProviderID.init)) }

@@ -112,7 +112,7 @@ final class DockController {
         isObserving = true
         withObservationTracking {
             _ = store.visible
-            _ = settings.size
+            _ = settings.scale
             _ = settings.metrics
             _ = system.availableMetrics
         } onChange: { [weak self] in
@@ -133,7 +133,7 @@ final class DockController {
     private func ringFramesChanged() {
         if let panel, let hosting, isVisible, dragStart == nil {
             let height = hosting.fittingSize.height
-            if abs(height - panel.frame.height) > 0.5 || abs(settings.size.metrics.width - panel.frame.width) > 0.5 {
+            if abs(height - panel.frame.height) > 0.5 || abs(settings.dockMetrics.width - panel.frame.width) > 0.5 {
                 layout(animated: true)
                 return
             }
@@ -145,7 +145,7 @@ final class DockController {
     private func layout(animated: Bool) {
         guard let panel, let hosting, let visible = screen?.visibleFrame else { return }
         hosting.layoutSubtreeIfNeeded()
-        let size = NSSize(width: settings.size.metrics.width, height: hosting.fittingSize.height)
+        let size = NSSize(width: settings.dockMetrics.width, height: hosting.fittingSize.height)
         let x = side == .right ? visible.maxX - size.width : visible.minX
         let centerY = visible.minY + visible.height * centerFraction
         let y = min(max(centerY - size.height / 2, visible.minY), visible.maxY - size.height)

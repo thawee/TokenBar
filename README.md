@@ -19,14 +19,14 @@ It was built as a lightweight alternative to [Token Monitor](https://github.com/
 - One ring per item: system metrics on top, AI tools below.
 - Hover a ring for a card with details: every limit window and its reset time, or the metric's breakdown.
 - Drag it anywhere. It snaps to the nearer edge of the screen you drop it on and remembers the screen, side and height.
-- Two sizes: **Normal** (76 pt, with section headings) and **Mini** (50 pt).
+- Any size from 46 to 76 pt wide with the Dock size slider. Everything scales together, and section headings show from 80% up.
 
 **Customize** (in the menu bar popover):
 
 | Setting | Options |
 |---|---|
 | Show side dock | on / off |
-| Dock size | Normal / Mini |
+| Dock size | slider, 60% to 100% (46 to 76 pt wide), default 85% |
 | AI limits | Used / Remaining. Applies to the dock, cards, popover and menu bar. Red at 90% used or 10% left. |
 | Menu bar | Most urgent tool / a specific tool / Icon only, number from 70% |
 | AI tools | Claude Code, Codex, GitHub Copilot, Antigravity. A tool you turn off is never checked: no Keychain read, no network call. |

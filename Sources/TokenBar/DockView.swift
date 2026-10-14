@@ -135,7 +135,7 @@ struct DockView: View {
     let state: DockState
     let onDrag: (_ ended: Bool) -> Void
 
-    private var m: DockMetrics { settings.size.metrics }
+    private var m: DockMetrics { settings.dockMetrics }
 
     /// Enabled metrics this Mac can report, in a fixed order.
     private var metrics: [SystemMetric] {

@@ -149,11 +149,12 @@ struct CustomizeSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker("Dock size", selection: $settings.size) {
-                Text("Normal").tag(DockSize.normal)
-                Text("Mini").tag(DockSize.mini)
+            HStack(spacing: 8) {
+                Text("Dock size")
+                Image(systemName: "circle.fill").font(.system(size: 6)).foregroundStyle(.secondary)
+                Slider(value: $settings.scale, in: DockScale.range, step: DockScale.step)
+                Image(systemName: "circle.fill").font(.system(size: 11)).foregroundStyle(.secondary)
             }
-            .pickerStyle(.segmented)
             Picker("AI limits", selection: $settings.limitDisplay) {
                 Text("Used").tag(LimitDisplay.used)
                 Text("Remaining").tag(LimitDisplay.remaining)
