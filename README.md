@@ -100,6 +100,10 @@ docs/DESIGN.md         design and decisions
 - Antigravity limits appear only while the Antigravity IDE is running. Gemini CLI quotas are not supported.
 - Hover cards depend on mouse tracking that was verified in code, but not with a real pointer on every macOS version.
 
+## License
+
+MIT, see [LICENSE](LICENSE). The tool logos are not covered by it; see Credits.
+
 ## Credits
 
 Tool logos come from [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT) via Token Monitor (MIT). They are trademarks of their owners. See `Resources/Icons/NOTICE.md`.
