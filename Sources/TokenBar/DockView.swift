@@ -302,7 +302,9 @@ struct HoverCard: View {
         Group {
             switch item {
             case .provider(let id): LimitCardContent(id: id, state: store.states[id], display: settings.limitDisplay)
-            case .metric(let metric): MetricCardContent(metric: metric, snapshot: system.snapshot)
+            case .metric(let metric):
+                MetricCardContent(metric: metric, snapshot: system.snapshot,
+                                  processes: system.processMetric == metric ? system.topProcesses : nil)
             }
         }
         .foregroundStyle(.white)
@@ -380,6 +382,8 @@ private struct LimitCardContent: View {
 private struct MetricCardContent: View {
     let metric: SystemMetric
     let snapshot: SystemSnapshot?
+    /// nil when this metric has no process list; empty while the first scan runs.
+    let processes: [ProcessUsage]?
 
     private var value: Double? { snapshot?.value(metric) }
 
@@ -396,6 +400,9 @@ private struct MetricCardContent: View {
             UsageBar(fraction: value.map(metric.fraction) ?? 0, tint: metric.tint)
             ForEach(details, id: \.self) { line in
                 Text(line).font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
+            }
+            if let processes {
+                ProcessList(metric: metric, processes: processes)
             }
         }
     }
@@ -416,5 +423,43 @@ private struct MetricCardContent: View {
             return [c("CPU die average", s.cpuTemperature), c("CPU hottest point", s.cpuTemperatureMax),
                     c("GPU die average", s.gpuTemperature)].compactMap { $0 }
         }
+    }
+}
+
+private struct ProcessList: View {
+    let metric: SystemMetric
+    let processes: [ProcessUsage]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(metric == .cpu ? "TOP PROCESSES" : "TOP PROCESSES (YOURS)")
+                .font(.system(size: 9, weight: .semibold)).tracking(0.6)
+                .foregroundStyle(.white.opacity(0.45))
+                .padding(.top, 4)
+            if processes.isEmpty {
+                Text("Measuring...").font(.system(size: 10)).foregroundStyle(.white.opacity(0.5))
+            }
+            ForEach(processes) { process in
+                HStack(spacing: 8) {
+                    Text(process.name)
+                        .font(.system(size: 11))
+                        .lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    Text(value(process.value))
+                        .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+            }
+            if metric == .cpu {
+                Text("Percent of one core, like Activity Monitor")
+                    .font(.system(size: 9)).foregroundStyle(.white.opacity(0.4))
+            }
+        }
+    }
+
+    private func value(_ v: Double) -> String {
+        if metric == .cpu { return String(format: "%.1f%%", v) }
+        let gb = v / 1_073_741_824
+        return gb >= 1 ? String(format: "%.1f GB", gb) : String(format: "%.0f MB", v / 1_048_576)
     }
 }

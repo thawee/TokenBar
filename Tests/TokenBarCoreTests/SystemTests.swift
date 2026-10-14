@@ -85,3 +85,47 @@ func liveSystemSample() async throws {
     try await Task.sleep(for: .milliseconds(1500))
     #expect(store.snapshot == first, "no sample published after stop")
 }
+
+@Test func parsesPSLinesWithSpacesInPaths() {
+    let text = """
+      429  44.9 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer
+     1214   4.6 /Applications/Azure VPN Client.app/Contents/MacOS/Azure VPN Client
+        1   0.0 /sbin/launchd
+    junk line
+    """
+    let rows = ProcessSampler.parsePS(text)
+    #expect(rows.map(\.pid) == [429, 1214, 1])
+    #expect(rows[0].name == "WindowServer")
+    #expect(rows[1].name == "Azure VPN Client")
+    #expect(rows[1].value == 4.6)
+}
+
+@Test func topMemoryReadsOwnProcesses() {
+    let top = ProcessSampler.topMemory(limit: 5)
+    #expect(!top.isEmpty)
+    #expect(top.count <= 5)
+    #expect(zip(top, top.dropFirst()).allSatisfy { $0.value >= $1.value })
+}
+
+@MainActor @Test func processFocusScansOnlyCPUAndMemoryAndClearsOnChange() async throws {
+    let store = SystemStore(interval: .milliseconds(300))
+    store.setProcessFocus(.gpu)
+    #expect(store.processMetric == nil, "GPU has no process list")
+
+    store.setProcessFocus(.memory)
+    #expect(store.processMetric == .memory)
+    let deadline = ContinuousClock.now + .seconds(5)
+    while store.topProcesses.isEmpty, ContinuousClock.now < deadline {
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    #expect(!store.topProcesses.isEmpty)
+
+    store.setProcessFocus(.cpu)
+    #expect(store.processMetric == .cpu)
+    #expect(store.topProcesses.isEmpty, "switching clears the old list")
+
+    store.setProcessFocus(nil)
+    #expect(store.processMetric == nil)
+    try await Task.sleep(for: .milliseconds(700))
+    #expect(store.topProcesses.isEmpty, "no scan published after focus cleared")
+}

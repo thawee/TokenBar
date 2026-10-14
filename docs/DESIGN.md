@@ -100,6 +100,15 @@ The menu bar (`MenuBarMode`) shows the most urgent tool's logo and number by def
 
 `SystemStore` samples every 2 s, and only while the dock is visible and at least one metric is enabled. The loop uses throwing sleeps, so stopping it never publishes a stale sample.
 
+### Top processes
+
+The CPU and Memory cards list the 5 heaviest processes. `SystemStore.setProcessFocus` starts a 2 s scan loop when one of those cards opens and stops it when the card closes, so the scan costs nothing the rest of the time. Scans run detached at utility priority.
+
+| List | Source | Why |
+|---|---|---|
+| CPU | `/bin/ps -axo pid=,%cpu=,comm=`, about 30 ms | `proc_pid_rusage` and `PROC_PIDTASKINFO` fail for root and system processes without root (244 of 541 here), which would hide WindowServer |
+| Memory | `proc_pid_rusage` `ri_phys_footprint` for readable (own) processes, about 1.3 ms for all | The footprint includes GPU and compressed memory. `ps` RSS showed a local model server at 0.2 GB while its footprint was 22.5 GB |
+
 ### Temperature
 
 Apple documents no temperature API for Apple Silicon. `DieTemperatures` picks a source once per machine:
@@ -180,7 +189,7 @@ The first minute after launch costs more (about 1 s of CPU), for the initial fet
 
 ## 9. Testing
 
-- **Unit tests** (`swift test`, 23): the parsers for all four tools against fixtures, Codex reset handling, ISO dates with microseconds, store intervals, retry after failure, the force floor, enabled tools, headline staleness, CPU tick math, the memory formula, SMC struct layout and decoders, and sampler stop.
+- **Unit tests** (`swift test`, 25): the parsers for all four tools against fixtures, Codex reset handling, ISO dates with microseconds, store intervals, retry after failure, the force floor, enabled tools, headline staleness, CPU tick math, the memory formula, SMC struct layout and decoders, and sampler stop.
 - **Live tests** (`LIVE=1`): call the real providers and sampler on this machine, printing values, never tokens.
 - **Visual checks:** the dock and cards were rendered off-screen with `ImageRenderer` (both sizes, both sides, used and remaining).
 - **Not automated:** real pointer hover and drag, because the development terminal has no Accessibility permission to send synthetic mouse events. A temporary debug hook confirmed the hover hit-testing and the card placement in the running app.
@@ -198,5 +207,5 @@ The first minute after launch costs more (about 1 s of CPU), for the initial fet
 
 - Gemini CLI quotas.
 - Optional token and cost totals for today (the "TODAY" header in the original mockup).
-- Per-process GPU attribution, to name the app behind sustained GPU load.
+- Per-process GPU attribution, to name the app behind sustained GPU load (the memory list already shows a local model server's footprint).
 - A tool-agnostic way to verify hover and drag in CI.

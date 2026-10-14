@@ -50,6 +50,11 @@ It was built as a lightweight alternative to [Token Monitor](https://github.com/
 
 System metrics are sampled only while the dock is visible and at least one metric is turned on.
 
+The CPU and Memory cards also list the **top 5 processes**, scanned every 2 s only while that card is open:
+
+- CPU: from `ps`, so system processes such as WindowServer are included. Percent of one core, like Activity Monitor.
+- Memory: physical footprint (Activity Monitor's "Memory" column) from `proc_pid_rusage`. Only your own processes can be read without root, so the list is labeled "yours". This is where a local model server shows up: its footprint includes the model held in GPU memory, which `ps` does not show.
+
 ## Privacy and safety
 
 - TokenBar never refreshes, rotates or writes any credential. If the Claude token has expired, it asks you to run Claude Code, which refreshes it. Refreshing it from a second app could sign Claude Code out.
@@ -71,7 +76,7 @@ System metrics are sampled only while the dock is visible and at least one metri
 For development:
 
 ```sh
-swift test                      # 23 unit tests: parsers, store, system math, SMC decoding
+swift test                      # 25 unit tests: parsers, store, system math, SMC decoding, processes
 LIVE=1 swift test --filter live # print what each provider and the sampler return on this machine
 ./scripts/bundle.sh             # builds build/TokenBar.app (release, ad-hoc signed)
 open build/TokenBar.app
@@ -90,6 +95,7 @@ Sources/
     Providers.swift    credential reads and fetches per tool
     Store.swift        LimitsStore: polling, intervals, enabled tools
     System.swift       SystemSampler (CPU, memory, GPU, temperature), SystemStore
+    Processes.swift    top processes by CPU (ps) and memory (footprint)
     SMC.swift          AppleSMC reader and die-temperature selection
   TokenBar/            the app
     TokenBarApp.swift  menu bar extra, popover, Customize section

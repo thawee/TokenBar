@@ -169,6 +169,11 @@ public final class SystemStore {
     /// Metrics this Mac can report. Only assigned when it changes, so views that lay
     /// out by it are not invalidated on every sample.
     public private(set) var availableMetrics: Set<SystemMetric> = []
+    /// Heaviest processes for the metric whose card is open (CPU or memory); empty until
+    /// the first scan, and cleared when the card closes.
+    public private(set) var topProcesses: [ProcessUsage] = []
+    public private(set) var processMetric: SystemMetric?
+    private var processLoop: Task<Void, Never>?
     public let interval: Duration
     private let sampler = SystemSampler()
     private var loop: Task<Void, Never>?
@@ -178,6 +183,31 @@ public final class SystemStore {
     }
 
     public var isRunning: Bool { loop != nil }
+
+    /// Scans processes every `interval` while `metric` is CPU or memory, and stops for
+    /// anything else. Scans run off the main actor.
+    public func setProcessFocus(_ metric: SystemMetric?) {
+        let metric = (metric == .cpu || metric == .memory) ? metric : nil
+        guard metric != processMetric else { return }
+        processLoop?.cancel()
+        processLoop = nil
+        processMetric = metric
+        topProcesses = []
+        guard let metric else { return }
+        processLoop = Task { [weak self, interval] in
+            do {
+                while true {
+                    let top = await Task.detached(priority: .utility) {
+                        metric == .cpu ? ProcessSampler.topCPU() : ProcessSampler.topMemory()
+                    }.value
+                    try Task.checkCancellation()
+                    guard let self else { return }
+                    if self.topProcesses != top { self.topProcesses = top }
+                    try await Task.sleep(for: interval)
+                }
+            } catch {}
+        }
+    }
 
     private func publish(_ snapshot: SystemSnapshot) {
         self.snapshot = snapshot

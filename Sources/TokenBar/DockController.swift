@@ -206,6 +206,8 @@ extension DockController {
     private func setHovered(_ item: DockItem?) {
         guard state.hovered != item else { return }
         state.hovered = item
+        // Process lists are scanned only while their card is open.
+        if case .metric(let metric)? = item { system.setProcessFocus(metric) } else { system.setProcessFocus(nil) }
         if let item {
             let hosting = cardHosting ?? makeCardPanel()
             hosting.rootView = HoverCard(item: item, store: store, system: system, settings: settings)
@@ -247,7 +249,9 @@ extension DockController {
         withObservationTracking {
             switch item {
             case .provider(let id): _ = store.states[id]
-            case .metric: _ = system.snapshot
+            case .metric:
+                _ = system.snapshot
+                _ = system.topProcesses
             }
         } onChange: { [weak self] in
             Task { @MainActor in
