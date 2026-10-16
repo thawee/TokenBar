@@ -6,8 +6,8 @@ cd "$(dirname "$0")/.."
 
 ./scripts/bundle.sh
 
-DEST=/Applications
-[ -w "$DEST" ] || { DEST="$HOME/Applications"; mkdir -p "$DEST"; }
+DEST="${DEST:-$HOME/Applications}"
+mkdir -p "$DEST"
 
 pkill -x TokenBar 2>/dev/null || true
 rm -rf "$DEST/TokenBar.app"

@@ -153,8 +153,8 @@ public struct CopilotProvider: LimitsProvider {
 
 // MARK: Antigravity
 
-/// Asks the Antigravity IDE's local language server, which needs no Google sign-in.
-/// The server's CSRF token is on its command line and its port comes from lsof.
+/// Queries the running Antigravity IDE's local language server when open, or falls back
+/// to the Antigravity CLI (`agy -p /quota --output-format json`).
 public struct AntigravityProvider: LimitsProvider {
     public let id = ProviderID.antigravity
     public let minInterval: TimeInterval = 120
@@ -163,34 +163,52 @@ public struct AntigravityProvider: LimitsProvider {
     static let method = "exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary"
 
     static let appPaths = ["/Applications/Antigravity.app", home.appending(path: "Applications/Antigravity.app").path]
+    static let cliPaths = [
+        "/opt/homebrew/bin/agy",
+        "/usr/local/bin/agy",
+        home.appending(path: ".local/bin/agy").path,
+        home.appending(path: ".gemini/antigravity-cli/bin/agy").path,
+    ]
 
     public func fetch() async throws -> LimitsReading {
-        guard let server = try Self.findServer() else {
-            if !Self.appPaths.contains(where: FileManager.default.fileExists(atPath:)) {
-                throw ProviderError.notConfigured("Antigravity not installed")
-            }
-            throw ProviderError.notRunning("Open Antigravity to see its limits")
-        }
-        let ports = try Self.listeningPorts(pid: server.pid)
-        var lastError: Error = ProviderError.failed("Language server did not answer")
-        for port in ports {
-            for scheme in ["https", "http"] {
-                var request = URLRequest(url: URL(string: "\(scheme)://127.0.0.1:\(port)/\(Self.method)")!)
-                request.httpMethod = "POST"
-                request.timeoutInterval = 3
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
-                request.setValue(server.csrfToken, forHTTPHeaderField: "X-Codeium-Csrf-Token")
-                request.httpBody = Data(#"{"forceRefresh":true}"#.utf8)
-                do {
-                    let data = try await HTTP.send(request, session: HTTP.loopback)
-                    return try Parsers.antigravity(data)
-                } catch {
-                    lastError = error
+        if let server = try Self.findServer() {
+            let ports = try Self.listeningPorts(pid: server.pid)
+            var lastError: Error = ProviderError.failed("Language server did not answer")
+            for port in ports {
+                for scheme in ["https", "http"] {
+                    var request = URLRequest(url: URL(string: "\(scheme)://127.0.0.1:\(port)/\(Self.method)")!)
+                    request.httpMethod = "POST"
+                    request.timeoutInterval = 3
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
+                    request.setValue(server.csrfToken, forHTTPHeaderField: "X-Codeium-Csrf-Token")
+                    request.httpBody = Data(#"{"forceRefresh":true}"#.utf8)
+                    do {
+                        let data = try await HTTP.send(request, session: HTTP.loopback)
+                        return try Parsers.antigravity(data)
+                    } catch {
+                        lastError = error
+                    }
                 }
             }
+            if Self.findCLI() == nil { throw lastError }
         }
-        throw lastError
+        if let cli = Self.findCLI() {
+            let output = try Shell.run(cli, ["-p", "/quota", "--output-format", "json"], timeout: 15)
+            let reading = try Parsers.antigravity(Data(output.utf8))
+            guard !reading.windows.isEmpty else {
+                throw ProviderError.notConfigured("No Antigravity CLI quota found")
+            }
+            return reading
+        }
+        if !Self.appPaths.contains(where: FileManager.default.fileExists(atPath:)) {
+            throw ProviderError.notConfigured("Antigravity not installed")
+        }
+        throw ProviderError.notRunning("Open Antigravity to see its limits")
+    }
+
+    static func findCLI() -> String? {
+        cliPaths.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     static func findServer() throws -> (pid: Int32, csrfToken: String)? {

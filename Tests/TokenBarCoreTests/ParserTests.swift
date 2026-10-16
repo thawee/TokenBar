@@ -65,6 +65,49 @@ private func fixture(_ name: String) throws -> Data {
     #expect(AntigravityProvider.flag("--missing", in: command) == nil)
 }
 
+@Test func antigravityParsesCLIQuotaOutput() throws {
+    let cliJSON = Data(#"""
+    {
+      "status": "SUCCESS",
+      "command": {
+        "name": "usage",
+        "data": {
+          "groups": [
+            {
+              "name": "Gemini Models",
+              "buckets": [
+                {"id": "gemini-weekly", "window": "weekly", "remaining_fraction": 0.98, "reset_time": "2026-10-23T01:45:33Z"},
+                {"id": "gemini-5h", "window": "5h", "remaining_fraction": 0.96, "reset_time": "2026-10-16T06:45:33Z"}
+              ]
+            },
+            {
+              "name": "Claude and GPT models",
+              "buckets": [
+                {"id": "3p-weekly", "window": "weekly", "remaining_fraction": 1.0, "reset_time": "2026-10-23T02:14:27Z"},
+                {"id": "3p-5h", "window": "5h", "remaining_fraction": 1.0, "reset_time": "2026-10-16T07:14:27Z"}
+              ]
+            },
+            {
+              "name": "Gemini 4 Argon",
+              "buckets": [
+                {"id": "gemini-argon-wtu-weekly", "window": "weekly", "remaining_fraction": 0.75, "reset_time": "2026-10-23T01:33:15Z"}
+              ]
+            }
+          ]
+        }
+      }
+    }
+    """#.utf8)
+    let reading = try Parsers.antigravity(cliJSON)
+    #expect(reading.windows.map(\.label) == [
+        "Gemini weekly", "Gemini 5-hour", "Claude/GPT weekly", "Claude/GPT 5-hour", "Gemini Argon weekly",
+    ])
+    let used = reading.windows.map { $0.usedPercent.map { Int($0.rounded()) } }
+    #expect(used == [2, 4, 0, 0, 25])
+    #expect(reading.headlineWindow?.label == "Gemini 5-hour")
+}
+
 @Test func percentIsClamped() {
     #expect(LimitWindow(label: "x", kind: .other, usedPercent: 140, resetsAt: nil).usedPercent == 100)
 }
+

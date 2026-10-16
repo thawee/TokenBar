@@ -1,6 +1,6 @@
 # TokenBar design
 
-Status: implemented (v0.1.0). Last updated 2026-10-14.
+Status: implemented (v0.2.0). Last updated 2026-10-16.
 
 ## 1. Goals
 
@@ -61,19 +61,19 @@ Each provider implements `LimitsProvider { id; minInterval; fetch() async throws
 | Claude Code | Keychain `Claude Code-credentials`, through `/usr/bin/security`; falls back to `~/.claude/.credentials.json` | `GET api.anthropic.com/api/oauth/usage`, `anthropic-beta: oauth-2025-04-20` | 300 s |
 | Codex | none | tail (512 KB) of the newest session file from the last 8 days' `YYYY/MM/DD` folders; last `rate_limits` event | 30 s |
 | Copilot | `~/.config/github-copilot/apps.json` or `hosts.json`, `oauth_token` | `GET api.github.com/copilot_internal/user` | 300 s |
-| Antigravity | CSRF token from the language server's command line (`ps`); port from `lsof` | `POST 127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary` (https, then http) | 120 s |
+| Antigravity | CSRF token from the IDE language server's command line (`ps`) + port (`lsof`), or the `agy` CLI's existing login | `POST 127.0.0.1:<port>/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary` when IDE runs; otherwise `agy -p "/quota" --output-format json` | 120 s |
 
-Response fields, as verified against live data on 2026-10-14:
+Response fields, as verified against live data:
 
 - **Claude:** `five_hour` / `seven_day` / `seven_day_opus` / `seven_day_sonnet`, each with `utilization` (percent) and `resets_at` (ISO 8601 with microseconds, so the fractional part is stripped before parsing).
 - **Codex:** `payload.rate_limits.primary` / `secondary` with `used_percent`, `window_minutes` (300 = 5-hour, 10080 = weekly) and `resets_at` (epoch seconds). A window whose reset time has already passed is shown as 0%, because the event is a snapshot from the last turn.
 - **Copilot:** `quota_snapshots.{premium_interactions,chat,completions}.percent_remaining`. Windows marked `unlimited` are skipped. Resets on `quota_reset_date` (`YYYY-MM-DD`).
-- **Antigravity:** `groups[].buckets[]` with `remainingFraction` (in one of three shapes), `resetTime` and bucket ids such as `gemini-5h` / `3p-weekly`.
+- **Antigravity:** `groups[].buckets[]` (either at top-level `response`/`summary` from the IDE language server or `command.data` from `agy -p "/quota" --output-format json`) with `remainingFraction` / `remaining_fraction`, `resetTime` / `reset_time` and bucket ids (`gemini-5h`, `gemini-weekly`, `3p-5h`, `3p-weekly`, `gemini-argon-wtu-weekly`).
 
 ### Scheduling (`LimitsStore`)
 
 - A loop ticks every 30 s and fetches every enabled provider whose interval has elapsed.
-- Opening the popover or pressing Refresh forces a fetch, but network providers are still kept at least 30 s apart.
+- Opening the popover runs a normal due-check refresh; pressing Refresh forces a fetch, keeping network providers at least 30 s apart.
 - After a `failed` or `unauthorized` error, a provider retries after 60 s instead of waiting a full interval.
 - A failed fetch keeps the last good reading, so the UI shows stale numbers, not nothing. `notConfigured` clears the reading.
 - Only one refresh runs at a time. A request that arrives during a refresh runs once that refresh finishes.
@@ -81,11 +81,13 @@ Response fields, as verified against live data on 2026-10-14:
 
 ### Display
 
-The used percentage is stored. `LimitDisplay` converts it to "used" or "left" in one place, so the dock, card, popover and menu bar always agree. The alert threshold is symmetric: 90% used or 10% left.
+The used percentage is stored. `LimitWindow.currentUsedPercent(now:)` returns `0` when a window's `resetsAt` time has passed so pre-reset usage is never shown alongside `"Resetting now"`. `LimitDisplay` converts it to "used" or "left" in one place, so the dock, card, popover and menu bar always agree. The alert threshold is symmetric: 90% used or 10% left.
 
 Each tool is represented by its headline window (`LimitsReading.headlineWindow`): the 5-hour window, or its first window if it has none, as with Copilot's monthly quota. The dock rings and the menu bar both use it. `LimitsStore.mostUrgent()` picks the visible tool with the highest headline usage, skipping windows whose reset time has passed.
 
-The menu bar (`MenuBarMode`) shows the most urgent tool's logo and number by default, a pinned tool, or just the gauge icon until a limit passes 70% used. Logos are drawn as 16 pt template images, so they follow the menu bar's light or dark appearance. Antigravity's multicolor logo becomes a silhouette. The number is not colored red: text color in a SwiftUI menu bar label could not be verified here.
+The menu bar (`MenuBarMode`) shows the most urgent tool's logo and number by default, a pinned tool, or just the gauge icon until a limit passes 70% used. Logos are drawn as 16 pt template images, so they follow the menu bar's light or dark appearance. Antigravity's multicolor logo becomes a silhouette.
+
+The menu bar popover (`LimitsPanel`) uses `ViewThatFits(in: .vertical)` to size intrinsically to its content up to 480 pt and scroll cleanly when multiple providers and the Customize section are expanded.
 
 ## 4. System metrics
 
@@ -102,7 +104,7 @@ The menu bar (`MenuBarMode`) shows the most urgent tool's logo and number by def
 
 ### Top processes
 
-The CPU and Memory cards list the 5 heaviest processes. `SystemStore.setProcessFocus` starts a 2 s scan loop when one of those cards opens and stops it when the card closes, so the scan costs nothing the rest of the time. Scans run detached at utility priority.
+The CPU and Memory cards list the 5 heaviest processes. `SystemStore.setProcessFocus` starts a 2 s scan loop when one of those cards opens and stops it when the card closes, so the scan costs nothing the rest of the time. Scans run detached at utility priority, and `ProcessList` reserves 5 rows while measuring so the hover card does not jump vertically when the first scan completes.
 
 | List | Source | Why |
 |---|---|---|
@@ -127,8 +129,9 @@ The SMC is read through the `AppleSMC` user client (selector 2), which needs no 
 
 - A borderless, `.nonactivatingPanel` `NSPanel` at `.statusBar` level, with `.canJoinAllSpaces`, `.fullScreenAuxiliary`, `.stationary` and `.ignoresCycle`. It floats over full-screen apps and never takes focus.
 - The rail shape (`DockShape`) is a rounded body with concave fillets where it meets the screen edge, drawn for the right edge and mirrored for the left.
-- Size comes from one scale factor (`DockScale`, 0.6 to 1.0, default 0.85). Every dimension in `DockMetrics` is derived from it: width (46 to 76 pt), ring, stroke, logo, text, spacing, edge fillet and corner radius. Section headings show from 0.8 up. This replaced two fixed sizes (Normal 76 pt, Mini 50 pt): on a real screen one felt too big and the other too small. Height comes from the SwiftUI content (`fittingSize`, measured after `layoutSubtreeIfNeeded`).
-- The panel relayouts when the visible tools, the size, the enabled metrics or the available metrics change, when the screen configuration changes, and when ring frames change after SwiftUI has applied an update.
+- Size comes from one scale factor (`DockScale`, 0.6 to 1.0, default 0.85). Every dimension in `DockMetrics` is derived from it: width (46 to 76 pt), ring, stroke, logo, text, spacing, edge fillet and corner radius. Section headings show from 0.8 up.
+- Provider rings show an error badge (`exclamationmark.circle.fill`) when a fetch fails, and ring strokes / card progress bars turn `alertRed` when in the alert threshold.
+- Right-clicking the dock opens a context menu with Refresh Limits, Used/Remaining toggle, Hide Side Dock and Quit.
 
 ### Drag and snap
 
@@ -140,15 +143,13 @@ The panel is moved with `NSEvent.mouseLocation` deltas, in AppKit screen coordin
 
 ### Hover
 
-SwiftUI `onHover` does not fire in an inactive app, and the dock's app is almost always inactive. So `DockHostingView` adds an `NSTrackingArea` with `.activeAlways`, `.mouseMoved` and `.inVisibleRect`, converts pointer positions to SwiftUI coordinates, and hit-tests the ring frames.
-
-Ring frames come from a `PreferenceKey` in a named `"dock"` coordinate space. They are keyed by `DockItem` (`.provider` or `.metric`).
+SwiftUI `onHover` does not fire in an inactive app, and the dock's app is almost always inactive. So `DockHostingView` adds an `NSTrackingArea` with `.activeAlways`, `.mouseMoved` and `.inVisibleRect`, converts pointer positions to SwiftUI coordinates, and hit-tests the ring frames by picking the closest ring vertically across the rail width (so Fitts's law edge hovering and vertical scrubbing between rings never drop hover).
 
 The card is a second, click-through panel (`ignoresMouseEvents`), so it never takes hover away from the rail:
 
 - It sits on the screen-interior side, vertically centered on the ring and clamped to the visible frame.
 - It is re-measured and repositioned when its data changes, after rail animations, and when ring frames move.
-- It closes when hover clears, when a drag starts, when the dock hides, and when its item leaves the rail.
+- It closes when hover clears, when right-clicking or dragging starts, when the dock hides, and when its item leaves the rail.
 
 ## 6. Settings
 
@@ -160,12 +161,12 @@ The card is a second, click-through panel (`ignoresMouseEvents`), so it never ta
 
 | Decision | Alternative rejected | Why |
 |---|---|---|
-| Native SwiftUI + AppKit | Electron (as in Token Monitor) | The size and memory goals. Measured: 644 KB bundle, 23 to 47 MB of memory. |
+| Native SwiftUI + AppKit | Electron (as in Token Monitor) | The size and memory goals. Measured: 668 KB bundle, 23 to 47 MB of memory. |
 | Read the Claude token, never refresh it | Refresh it with `console.anthropic.com/v1/oauth/token` | Refreshing can rotate the token Claude Code holds and sign it out. On macOS, Token Monitor refreshes but does not write back to the Keychain. |
 | `/usr/bin/security` for the Keychain read | `SecItemCopyMatching` | The item's access list already trusts `security`. A native read from an ad-hoc-signed app prompts again after every rebuild. |
 | Codex from local session logs | `chatgpt.com/backend-api/wham/usage` | The same numbers with no network and no credentials. |
 | Copilot token from `apps.json` | GitHub device-flow login | Verified accepted by `copilot_internal/user` (HTTP 200) on 2026-10-14, so no login UI is needed. |
-| Antigravity through the local language server | Google OAuth with the IDE's client secret | No sign-in and no embedded secrets. The cost: it works only while the IDE runs. |
+| Antigravity through the local IDE language server or `agy -p /quota` | Google OAuth with embedded client secret | No sign-in UI and no embedded secrets; works whether the user runs the Antigravity IDE or the `agy` CLI. |
 | SMC `TCMb`/`TCMz` for temperature | HID `PMU tdie` sensors (first implementation) | On an M3 Pro under load, `PMU tdie` stayed flat at 66.8–67.0 °C while `TCMb` read 98–105 °C and followed the load. The HID sensors probably measure the power-management chip. |
 | SMC `TCMb`/`TCMz` | hagimi-monitor's fixed M1 key list (`Tp09`, `Tp0T`, …) | Only 5 of those 10 keys exist on the M3 Pro, and their meanings vary by chip. `TCMb` is the SMC's own aggregate. |
 | Temperature every 10 s, read only the needed keys | Reading every sensor every 2 s | The first build read 36 HID sensors per sample: 39 ms per sample and about 5% CPU in its first minute. |
@@ -179,7 +180,7 @@ Measured on an M3 Pro (36 GB) running macOS 26:
 
 | | Value |
 |---|---|
-| Bundle size | 644 KB |
+| Bundle size | 668 KB |
 | Memory (physical footprint) | 19 MB menu bar only; 23 to 47 MB with the dock and all metrics, varying between runs. Flat at 47 MB over 4 minutes in the latest run, so not growing. |
 | Steady CPU with the dock and all metrics | 0.29 s per 60 s, about 0.5% |
 | First sample | 0.32 s, once, off the main thread (SMC key walk for the GPU keys) |
@@ -189,10 +190,9 @@ The first minute after launch costs more (about 1 s of CPU), for the initial fet
 
 ## 9. Testing
 
-- **Unit tests** (`swift test`, 25): the parsers for all four tools against fixtures, Codex reset handling, ISO dates with microseconds, store intervals, retry after failure, the force floor, enabled tools, headline staleness, CPU tick math, the memory formula, SMC struct layout and decoders, and sampler stop.
+- **Unit tests** (`swift test`, 28): the parsers for all four tools (including Antigravity CLI `/quota` JSON) against fixtures, Codex and window reset expiry handling, ISO dates with microseconds, store intervals, retry after failure, the force floor, enabled tools, headline staleness, CPU tick math, the memory formula, SMC struct layout and decoders, and sampler stop.
 - **Live tests** (`LIVE=1`): call the real providers and sampler on this machine, printing values, never tokens.
 - **Visual checks:** the dock and cards were rendered off-screen with `ImageRenderer` (both sizes, both sides, used and remaining).
-- **Not automated:** real pointer hover and drag, because the development terminal has no Accessibility permission to send synthetic mouse events. A temporary debug hook confirmed the hover hit-testing and the card placement in the running app.
 
 ## 10. Risks
 
@@ -200,12 +200,12 @@ The first minute after launch costs more (about 1 s of CPU), for the initial fet
 |---|---|---|
 | Claude or Copilot changes the undocumented endpoint | That tool shows an error | The error appears per tool, and the last good reading stays |
 | SMC keys differ on other chips | Temperature is missing or off | The 15–130 °C filter, the per-core fallback, and hiding the metric when unavailable |
-| Antigravity language-server API changes | Antigravity shows an error | Only matters when the IDE is installed |
+| Antigravity language-server or CLI `/quota` format changes | Antigravity shows an error | Error badge on the dock ring and error message in the popover/card |
 | The Keychain prompt is denied | Claude shows "not configured" | Documented in the README |
 
 ## 11. Future work
 
-- Gemini CLI quotas.
+- Gemini CLI (`gemini`) quotas.
 - Optional token and cost totals for today (the "TODAY" header in the original mockup).
 - Per-process GPU attribution, to name the app behind sustained GPU load (the memory list already shows a local model server's footprint).
 - A tool-agnostic way to verify hover and drag in CI.

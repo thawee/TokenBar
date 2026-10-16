@@ -12,7 +12,7 @@ struct MenuBarLabel: View {
             return store.mostUrgent().map { ($0.id, $0.usedPercent) }
         case .tool(let id):
             guard settings.tools.contains(id) else { return nil }
-            return (id, store.states[id]?.reading?.headlineWindow?.usedPercent)
+            return (id, store.states[id]?.reading?.headlineWindow?.currentUsedPercent())
         case .iconOnly:
             guard let urgent = store.mostUrgent(), urgent.usedPercent >= MenuBarMode.quietThreshold else { return nil }
             return (urgent.id, urgent.usedPercent)

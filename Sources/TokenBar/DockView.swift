@@ -134,6 +134,7 @@ struct DockView: View {
     let settings: DockSettings
     let state: DockState
     let onDrag: (_ ended: Bool) -> Void
+    var onHide: (() -> Void)? = nil
 
     private var m: DockMetrics { settings.dockMetrics }
 
@@ -166,11 +167,14 @@ struct DockView: View {
             if !store.visible.isEmpty {
                 header(settings.limitDisplay == .used ? "AI USED" : "AI LEFT")
                 ForEach(store.visible) { id in
-                    let shown = settings.limitDisplay.value(store.states[id]?.reading?.headlineWindow?.usedPercent)
+                    let providerState = store.states[id]
+                    let used = providerState?.reading?.headlineWindow?.currentUsedPercent()
+                    let shown = settings.limitDisplay.value(used)
                     ring(.provider(id)) {
                         RingGauge(m: m, tint: id.tint, value: shown,
                                   fraction: (shown ?? 0) / 100,
                                   label: percentText, alert: settings.limitDisplay.isAlert,
+                                  hasError: providerState?.error != nil,
                                   highlighted: state.hovered == .provider(id)) {
                             ProviderLogo(id: id, size: m.logo)
                         }
@@ -204,6 +208,21 @@ struct DockView: View {
                 .onChanged { _ in onDrag(false) }
                 .onEnded { _ in onDrag(true) }
         )
+        .contextMenu {
+            Button("Refresh Limits") {
+                Task { await store.refresh(force: true) }
+            }
+            .disabled(store.isRefreshing)
+            Button(settings.limitDisplay == .used ? "Show Remaining %" : "Show Used %") {
+                settings.limitDisplay = settings.limitDisplay == .used ? .remaining : .used
+            }
+            if let onHide {
+                Divider()
+                Button("Hide Side Dock") { onHide() }
+            }
+            Divider()
+            Button("Quit TokenBar") { NSApplication.shared.terminate(nil) }
+        }
     }
 
     @ViewBuilder private func header(_ text: String) -> some View {
@@ -260,11 +279,14 @@ struct RingGauge<Center: View>: View {
     let fraction: Double
     let label: (Double?) -> String
     let alert: (Double) -> Bool
+    var hasError = false
     var highlighted = false
     /// Off for system metrics: they change every 2 s, and animating each change keeps
     /// SwiftUI redrawing at display rate.
     var animated = true
     @ViewBuilder let center: () -> Center
+
+    private var isAlert: Bool { value.map(alert) == true }
 
     var body: some View {
         VStack(spacing: m.headers ? 5 : 3) {
@@ -273,17 +295,27 @@ struct RingGauge<Center: View>: View {
                 Circle().stroke(.white.opacity(0.10), lineWidth: m.line)
                 Circle()
                     .trim(from: 0, to: fraction)
-                    .stroke(tint, style: StrokeStyle(lineWidth: m.line, lineCap: .round))
+                    .stroke(isAlert ? alertRed : tint, style: StrokeStyle(lineWidth: m.line, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(animated ? .easeOut(duration: 0.6) : nil, value: fraction)
                 center()
+                    .opacity(hasError && value == nil ? 0.55 : 1)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if hasError {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: max(9, (m.ring * 0.30).rounded())))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, alertRed)
+                        .offset(x: 2, y: 2)
+                }
             }
             .frame(width: m.ring, height: m.ring)
             .scaleEffect(highlighted ? 1.08 : 1)
             .animation(.easeOut(duration: 0.15), value: highlighted)
             Text(label(value))
                 .font(.system(size: m.font, weight: .semibold).monospacedDigit())
-                .foregroundStyle(value.map(alert) == true ? alertRed : .white.opacity(0.9))
+                .foregroundStyle(isAlert || (hasError && value == nil) ? alertRed : .white.opacity(0.9))
         }
     }
 }
@@ -352,16 +384,17 @@ private struct LimitCardContent: View {
                 }
             }
             ForEach(Array((state?.reading?.windows ?? []).enumerated()), id: \.offset) { _, window in
-                let shown = display.value(window.usedPercent)
+                let shown = display.value(window.currentUsedPercent())
+                let isAlert = shown.map(display.isAlert) == true
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(window.label).font(.system(size: 11))
                         Spacer()
                         Text(shown.map { "\(percentText($0)) \(display.word)" } ?? "--")
                             .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                            .foregroundStyle(shown.map(display.isAlert) == true ? alertRed : .white)
+                            .foregroundStyle(isAlert ? alertRed : .white)
                     }
-                    UsageBar(fraction: (shown ?? 0) / 100, tint: id.tint)
+                    UsageBar(fraction: (shown ?? 0) / 100, tint: isAlert ? alertRed : id.tint)
                     if let resetsAt = window.resetsAt {
                         Text(resetText(resetsAt))
                             .font(.system(size: 10)).foregroundStyle(.white.opacity(0.55))
@@ -386,6 +419,7 @@ private struct MetricCardContent: View {
     let processes: [ProcessUsage]?
 
     private var value: Double? { snapshot?.value(metric) }
+    private var isAlert: Bool { value.map(metric.isAlert) == true }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -395,9 +429,9 @@ private struct MetricCardContent: View {
                 Spacer(minLength: 4)
                 Text(value.map(metric.label) ?? "--")
                     .font(.system(size: 13, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(value.map(metric.isAlert) == true ? alertRed : .white)
+                    .foregroundStyle(isAlert ? alertRed : .white)
             }
-            UsageBar(fraction: value.map(metric.fraction) ?? 0, tint: metric.tint)
+            UsageBar(fraction: value.map(metric.fraction) ?? 0, tint: isAlert ? alertRed : metric.tint)
             ForEach(details, id: \.self) { line in
                 Text(line).font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
             }
@@ -437,7 +471,14 @@ private struct ProcessList: View {
                 .foregroundStyle(.white.opacity(0.45))
                 .padding(.top, 4)
             if processes.isEmpty {
-                Text("Measuring...").font(.system(size: 10)).foregroundStyle(.white.opacity(0.5))
+                ForEach(0..<5, id: \.self) { row in
+                    HStack(spacing: 8) {
+                        Text(row == 0 ? "Measuring..." : " ")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.5))
+                        Spacer(minLength: 4)
+                    }
+                }
             }
             ForEach(processes) { process in
                 HStack(spacing: 8) {

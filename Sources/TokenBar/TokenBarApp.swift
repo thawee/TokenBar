@@ -47,7 +47,36 @@ struct LimitsPanel: View {
     @Binding var dockVisible: Bool
     @AppStorage("panel.customizeExpanded") private var customizeExpanded = false
 
+    private static let maxScrollHeight: CGFloat = 480
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ViewThatFits(in: .vertical) {
+                panelContent
+                ScrollView {
+                    panelContent
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .frame(height: Self.maxScrollHeight)
+            }
+
+            HStack(spacing: 8) {
+                Button("Refresh") { Task { await store.refresh(force: true) } }
+                    .disabled(store.isRefreshing)
+                if store.isRefreshing {
+                    ProgressView().controlSize(.mini)
+                }
+                Spacer()
+                Button("Quit") { NSApplication.shared.terminate(nil) }
+            }
+            .controlSize(.small)
+        }
+        .padding(14)
+        .frame(width: 300)
+        .task { await store.refresh() }
+    }
+
+    private var panelContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             if store.visible.isEmpty {
                 Text(settings.tools.isEmpty ? "All AI tools are turned off"
@@ -68,17 +97,8 @@ struct LimitsPanel: View {
                 CustomizeSection(settings: settings).padding(.top, 6)
             }
             .font(.callout)
-            HStack {
-                Button("Refresh") { Task { await store.refresh(force: true) } }
-                    .disabled(store.isRefreshing)
-                Spacer()
-                Button("Quit") { NSApplication.shared.terminate(nil) }
-            }
-            .controlSize(.small)
         }
-        .padding(14)
-        .frame(width: 300)
-        .task { await store.refresh(force: true) }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -116,8 +136,10 @@ struct WindowRow: View {
     let window: LimitWindow
     let display: LimitDisplay
 
+    private var used: Double? { window.currentUsedPercent() }
+
     var body: some View {
-        let shown = display.value(window.usedPercent)
+        let shown = display.value(used)
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(window.label).font(.callout)
@@ -136,7 +158,7 @@ struct WindowRow: View {
 
     /// Severity follows usage whichever way the number is shown.
     private var tint: Color {
-        switch window.usedPercent ?? 0 {
+        switch used ?? 0 {
         case 90...: .red
         case 70..<90: .orange
         default: .green

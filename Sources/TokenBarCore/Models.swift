@@ -32,6 +32,13 @@ public struct LimitWindow: Sendable, Equatable {
         self.usedPercent = usedPercent.map { min(max($0, 0), 100) }
         self.resetsAt = resetsAt
     }
+
+    /// Returns 0 when the window's reset time has already passed; otherwise `usedPercent`.
+    public func currentUsedPercent(now: Date = Date()) -> Double? {
+        guard let usedPercent else { return nil }
+        if let resetsAt, resetsAt <= now { return 0 }
+        return usedPercent
+    }
 }
 
 public struct LimitsReading: Sendable, Equatable {

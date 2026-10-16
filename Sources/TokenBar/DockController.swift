@@ -91,9 +91,17 @@ final class DockController {
         panel.hidesOnDeactivate = false
         panel.acceptsMouseMovedEvents = true
 
-        let hosting = DockHostingView(rootView: DockView(store: store, system: system, settings: settings, state: state) { [weak self] ended in
-            self?.handleDrag(ended: ended)
-        })
+        let hosting = DockHostingView(rootView: DockView(
+            store: store,
+            system: system,
+            settings: settings,
+            state: state,
+            onDrag: { [weak self] ended in self?.handleDrag(ended: ended) },
+            onHide: { [weak self] in
+                self?.defaults.set(false, forKey: "dock.visible")
+                self?.hide()
+            }
+        ))
         hosting.onPointer = { [weak self] point in self?.pointerMoved(to: point) }
         // Ring frames settle after every rail layout; keep an open card on its ring.
         state.onRingFramesChange = { [weak self] in self?.ringFramesChanged() }
@@ -199,7 +207,17 @@ extension DockController {
     /// `point` is in the rail's SwiftUI coordinates (top-left origin), nil when the pointer left.
     fileprivate func pointerMoved(to point: CGPoint?) {
         guard dragStart == nil else { return }
-        let hit = point.flatMap { p in state.ringFrames.first { $0.value.insetBy(dx: -6, dy: -4).contains(p) }?.key }
+        let padY = settings.dockMetrics.spacing + 8
+        let hit = point.flatMap { p in
+            state.ringFrames
+                .filter { $0.value.insetBy(dx: 0, dy: -padY).minY ... $0.value.insetBy(dx: 0, dy: -padY).maxY ~= p.y }
+                .min { a, b in
+                    let da = abs(a.value.midY - p.y)
+                    let db = abs(b.value.midY - p.y)
+                    return da != db ? da < db : a.key.id < b.key.id
+                }?
+                .key
+        }
         setHovered(hit)
     }
 
@@ -312,6 +330,11 @@ final class DockHostingView: NSHostingView<DockView> {
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
         onPointer?(nil)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        onPointer?(nil)
+        super.rightMouseDown(with: event)
     }
 
     private func report(_ event: NSEvent) {

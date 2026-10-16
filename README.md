@@ -18,6 +18,7 @@ It was built as a lightweight alternative to [Token Monitor](https://github.com/
 
 - One ring per item: system metrics on top, AI tools below.
 - Hover a ring for a card with details: every limit window and its reset time, or the metric's breakdown.
+- Right-click the dock for quick actions: Refresh Limits, toggle Used/Remaining %, Hide Side Dock, or Quit.
 - Drag it anywhere. It snaps to the nearer edge of the screen you drop it on and remembers the screen, side and height.
 - Any size from 46 to 76 pt wide with the Dock size slider. Everything scales together, and section headings show from 80% up.
 
@@ -39,7 +40,7 @@ It was built as a lightweight alternative to [Token Monitor](https://github.com/
 | Claude Code | OAuth token from the Keychain item `Claude Code-credentials`, then `GET api.anthropic.com/api/oauth/usage` | every 5 min |
 | Codex | `rate_limits` in the newest `~/.codex/sessions/YYYY/MM/DD/*.jsonl` | none |
 | GitHub Copilot | `oauth_token` from `~/.config/github-copilot/apps.json`, then `GET api.github.com/copilot_internal/user` | every 5 min |
-| Antigravity | the running IDE's local language server (`RetrieveUserQuotaSummary`) | loopback only, every 2 min |
+| Antigravity | the running IDE's local language server (`RetrieveUserQuotaSummary`), or `agy -p "/quota" --output-format json` via the Antigravity CLI | every 2 min |
 
 | Metric | Source | Interval |
 |---|---|---|
@@ -70,13 +71,13 @@ The CPU and Memory cards also list the **top 5 processes**, scanned every 2 s on
 ## Build and run
 
 ```sh
-./scripts/install.sh            # build, copy to /Applications (or ~/Applications), launch
+./scripts/install.sh            # build, copy to ~/Applications (or DEST=/Applications), launch
 ```
 
 For development:
 
 ```sh
-swift test                      # 25 unit tests: parsers, store, system math, SMC decoding, processes
+swift test                      # 28 unit tests: parsers, store, system math, SMC decoding, processes
 LIVE=1 swift test --filter live # print what each provider and the sampler return on this machine
 ./scripts/bundle.sh             # builds build/TokenBar.app (release, ad-hoc signed)
 open build/TokenBar.app
@@ -115,7 +116,7 @@ docs/DESIGN.md         design and decisions
 
 - The Claude and Copilot usage endpoints are undocumented and may change without notice.
 - Temperature relies on undocumented SMC keys that differ between chips. On chips without `TCMb`, the per-core average may include keys that are not core temperatures.
-- Antigravity limits appear only while the Antigravity IDE is running. Gemini CLI quotas are not supported.
+- Without the `agy` CLI installed, Antigravity limits appear only while the Antigravity IDE is running. Gemini CLI (`gemini`) quotas are not supported.
 - Hover cards depend on mouse tracking that was verified in code, but not with a real pointer on every macOS version.
 
 ## License

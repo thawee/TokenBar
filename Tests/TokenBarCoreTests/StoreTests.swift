@@ -119,3 +119,14 @@ private func reading(_ percent: Double, resetsAt: Date? = nil) -> LimitsReading 
     #expect(session.headlineWindow?.label == "5-hour")
     #expect(monthly.headlineWindow?.label == "Premium")
 }
+
+@Test func windowCurrentUsedPercentResetsAfterExpiry() {
+    let now = Date()
+    let expired = LimitWindow(label: "5-hour", kind: .session, usedPercent: 95, resetsAt: now.addingTimeInterval(-1))
+    let active = LimitWindow(label: "5-hour", kind: .session, usedPercent: 95, resetsAt: now.addingTimeInterval(60))
+    let noReset = LimitWindow(label: "Monthly", kind: .monthly, usedPercent: 50, resetsAt: nil)
+    #expect(expired.currentUsedPercent(now: now) == 0)
+    #expect(active.currentUsedPercent(now: now) == 95)
+    #expect(noReset.currentUsedPercent(now: now) == 50)
+}
+

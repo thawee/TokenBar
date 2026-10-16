@@ -91,14 +91,16 @@ public enum Parsers {
         return LimitsReading(plan: root["copilot_plan"] as? String, windows: windows, observedAt: now)
     }
 
-    // MARK: Antigravity: local language server RetrieveUserQuotaSummary
+    // MARK: Antigravity: IDE language server RetrieveUserQuotaSummary or `agy -p /quota --output-format json`
 
     public static func antigravity(_ data: Data, now: Date = Date()) throws -> LimitsReading {
         let root = try jsonObject(data)
-        let summary = (root["response"] ?? root["summary"]) as? [String: Any] ?? root
+        let cliData = (root["command"] as? [String: Any])?["data"] as? [String: Any]
+        let summary = cliData ?? ((root["response"] ?? root["summary"]) as? [String: Any] ?? root)
         var windows: [LimitWindow] = []
         for group in summary["groups"] as? [[String: Any]] ?? [] {
-            let groupName = antigravityGroupName(group["displayName"] as? String)
+            let rawGroupName = (group["displayName"] ?? group["name"]) as? String
+            let groupName = antigravityGroupName(rawGroupName)
             for bucket in group["buckets"] as? [[String: Any]] ?? [] {
                 guard let kind = antigravityBucketKind(bucket) else { continue }
                 let remaining = (bucket["disabled"] as? Bool) == true ? nil : antigravityRemaining(bucket)
@@ -106,7 +108,7 @@ public enum Parsers {
                     label: "\(groupName) \(kind == .session ? "5-hour" : "weekly")",
                     kind: kind,
                     usedPercent: remaining.map { (1 - $0) * 100 },
-                    resetsAt: isoDate(bucket["resetTime"])
+                    resetsAt: isoDate(bucket["resetTime"] ?? bucket["reset_time"])
                 ))
             }
         }
@@ -115,6 +117,7 @@ public enum Parsers {
 
     static func antigravityGroupName(_ name: String?) -> String {
         let lower = (name ?? "").lowercased()
+        if lower.contains("argon") { return "Gemini Argon" }
         if lower.contains("gemini") { return "Gemini" }
         if lower.contains("claude") || lower.contains("gpt") { return "Claude/GPT" }
         return name?.isEmpty == false ? name! : "Quota"
@@ -122,7 +125,7 @@ public enum Parsers {
 
     static func antigravityBucketKind(_ bucket: [String: Any]) -> WindowKind? {
         let aliases: Set<String> = ["session", "5h", "5-hour", "five hour", "five-hour", "five-hour limit", "five hour limit"]
-        for key in ["window", "bucketId", "displayName"] {
+        for key in ["window", "bucketId", "id", "displayName", "name"] {
             guard let raw = bucket[key] as? String else { continue }
             let value = raw.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: "_", with: "-")
             if value == "weekly" || value.hasSuffix("-weekly") || value == "weekly limit" { return .weekly }
@@ -132,9 +135,9 @@ public enum Parsers {
     }
 
     static func antigravityRemaining(_ bucket: [String: Any]) -> Double? {
-        if let direct = number(bucket["remainingFraction"]) { return direct }
+        if let direct = number(bucket["remainingFraction"] ?? bucket["remaining_fraction"]) { return direct }
         guard let remaining = bucket["remaining"] as? [String: Any] else { return nil }
-        if let fraction = number(remaining["remainingFraction"]) { return fraction }
+        if let fraction = number(remaining["remainingFraction"] ?? remaining["remaining_fraction"]) { return fraction }
         if remaining["case"] as? String == "remainingFraction" { return number(remaining["value"]) }
         return nil
     }
