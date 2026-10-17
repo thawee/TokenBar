@@ -185,7 +185,7 @@ struct CustomizeSection: View {
             Picker("Menu bar", selection: $settings.menuBar) {
                 Text("Most urgent tool").tag(MenuBarMode.urgent)
                 Divider()
-                ForEach(ProviderID.allCases) { id in
+                ForEach(ProviderID.displayOrder) { id in
                     Text(id.displayName).tag(MenuBarMode.tool(id))
                 }
                 Divider()
@@ -193,7 +193,7 @@ struct CustomizeSection: View {
             }
             .pickerStyle(.menu)
             group("AI tools", note: "Turned-off tools are not checked at all.") {
-                ForEach(ProviderID.allCases) { id in
+                ForEach(ProviderID.displayOrder) { id in
                     Toggle(id.displayName, isOn: settings.binding(for: id))
                 }
             }

@@ -33,6 +33,20 @@ private func reading(_ percent: Double, resetsAt: Date? = nil) -> LimitsReading 
     )
 }
 
+@MainActor @Test func aiToolsAppearInDisplayNameOrder() async {
+    let expected: [ProviderID] = [.antigravity, .claude, .codex, .copilot]
+    #expect(ProviderID.displayOrder == expected)
+
+    let store = LimitsStore(providers: [
+        FakeProvider(.copilot, [.success(reading(10))]),
+        FakeProvider(.codex, [.success(reading(20))]),
+        FakeProvider(.antigravity, [.success(reading(30))]),
+        FakeProvider(.claude, [.success(reading(40))]),
+    ])
+    await store.refresh()
+    #expect(store.visible == expected)
+}
+
 @MainActor @Test func failureKeepsLastReadingAndRetriesWithinAMinute() async {
     let fake = FakeProvider(.claude, [.success(reading(40)), .failure(.failed("HTTP 500")), .success(reading(50))])
     let store = LimitsStore(providers: [fake])

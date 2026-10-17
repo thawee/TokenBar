@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1 (2026-10-18)
+
+- Show AI tools A–Z by name in the dock, popover, menu bar picker, and settings.
+
 ## 0.2.0 (2026-10-16)
 
 ### Features

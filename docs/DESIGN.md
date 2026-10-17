@@ -1,6 +1,6 @@
 # TokenBar design
 
-Status: implemented (v0.2.0). Last updated 2026-10-16.
+Status: implemented (v0.2.1). Last updated 2026-10-18.
 
 ## 1. Goals
 
@@ -86,6 +86,8 @@ The used percentage is stored. `LimitWindow.currentUsedPercent(now:)` returns `0
 Each tool is represented by its headline window (`LimitsReading.headlineWindow`): the 5-hour window, or its first window if it has none, as with Copilot's monthly quota. The dock rings and the menu bar both use it. `LimitsStore.mostUrgent()` picks the visible tool with the highest headline usage, skipping windows whose reset time has passed.
 
 The menu bar (`MenuBarMode`) shows the most urgent tool's logo and number by default, a pinned tool, or just the gauge icon until a limit passes 70% used. Logos are drawn as 16 pt template images, so they follow the menu bar's light or dark appearance. Antigravity's multicolor logo becomes a silhouette.
+
+`ProviderID.displayOrder` sorts tools by display name. The dock, popover, menu bar picker, and settings use this order.
 
 The menu bar popover (`LimitsPanel`) uses `ViewThatFits(in: .vertical)` to size intrinsically to its content up to 480 pt and scroll cleanly when multiple providers and the Customize section are expanded.
 
@@ -180,7 +182,7 @@ Measured on an M3 Pro (36 GB) running macOS 26:
 
 | | Value |
 |---|---|
-| Bundle size | 668 KB |
+| Bundle size | 684 KB |
 | Memory (physical footprint) | 19 MB menu bar only; 23 to 47 MB with the dock and all metrics, varying between runs. Flat at 47 MB over 4 minutes in the latest run, so not growing. |
 | Steady CPU with the dock and all metrics | 0.29 s per 60 s, about 0.5% |
 | First sample | 0.32 s, once, off the main thread (SMC key walk for the GPU keys) |
@@ -190,7 +192,7 @@ The first minute after launch costs more (about 1 s of CPU), for the initial fet
 
 ## 9. Testing
 
-- **Unit tests** (`swift test`, 28): the parsers for all four tools (including Antigravity CLI `/quota` JSON) against fixtures, Codex and window reset expiry handling, ISO dates with microseconds, store intervals, retry after failure, the force floor, enabled tools, headline staleness, CPU tick math, the memory formula, SMC struct layout and decoders, and sampler stop.
+- **Unit tests** (`swift test`, 29): the parsers for all four tools (including Antigravity CLI `/quota` JSON) against fixtures, Codex and window reset expiry handling, ISO dates with microseconds, store intervals, retry after failure, the force floor, enabled tools, display order, headline staleness, CPU tick math, the memory formula, SMC struct layout and decoders, and sampler stop.
 - **Live tests** (`LIVE=1`): call the real providers and sampler on this machine, printing values, never tokens.
 - **Visual checks:** the dock and cards were rendered off-screen with `ImageRenderer` (both sizes, both sides, used and remaining).
 

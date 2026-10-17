@@ -2,9 +2,9 @@
 
 A lightweight native macOS menu bar app and side dock that shows how much of your AI coding plan limits you have used, next to CPU, memory, GPU and temperature for the whole Mac.
 
-- **AI plan limits** for Claude Code, Codex, GitHub Copilot and Antigravity: 5-hour, weekly and monthly windows with reset times.
+- **AI plan limits** for Antigravity, Claude Code, Codex, and GitHub Copilot: 5-hour, weekly, and monthly windows with reset times.
 - **System load** for running local models: CPU, memory, GPU and CPU/GPU die temperature.
-- **Native and small**: SwiftUI + AppKit, no dependencies, about 640 KB on disk, 23 to 47 MB of memory and about 0.5% CPU while sampling.
+- **Native and small**: SwiftUI + AppKit, no dependencies, about 684 KB on disk, 23 to 47 MB of memory and about 0.5% CPU while sampling.
 
 It was built as a lightweight alternative to [Token Monitor](https://github.com/Javis603/token-monitor), covering only plan limits and system load.
 
@@ -30,17 +30,17 @@ It was built as a lightweight alternative to [Token Monitor](https://github.com/
 | Dock size | slider, 60% to 100% (46 to 76 pt wide), default 85% |
 | AI limits | Used / Remaining. Applies to the dock, cards, popover and menu bar. Red at 90% used or 10% left. |
 | Menu bar | Most urgent tool / a specific tool / Icon only, number from 70% |
-| AI tools | Claude Code, Codex, GitHub Copilot, Antigravity. A tool you turn off is never checked: no Keychain read, no network call. |
+| AI tools | Antigravity, Claude Code, Codex, GitHub Copilot, shown A–Z in the dock, popover, menu bar picker, and settings. A tool you turn off is never checked: no Keychain read, no network call. |
 | System | CPU, Memory, GPU, Temperature |
 
 ## Data sources
 
 | Tool | Source | Network |
 |---|---|---|
+| Antigravity | the running IDE's local language server (`RetrieveUserQuotaSummary`), or `agy -p "/quota" --output-format json` via the Antigravity CLI | every 2 min |
 | Claude Code | OAuth token from the Keychain item `Claude Code-credentials`, then `GET api.anthropic.com/api/oauth/usage` | every 5 min |
 | Codex | `rate_limits` in the newest `~/.codex/sessions/YYYY/MM/DD/*.jsonl` | none |
 | GitHub Copilot | `oauth_token` from `~/.config/github-copilot/apps.json`, then `GET api.github.com/copilot_internal/user` | every 5 min |
-| Antigravity | the running IDE's local language server (`RetrieveUserQuotaSummary`), or `agy -p "/quota" --output-format json` via the Antigravity CLI | every 2 min |
 
 | Metric | Source | Interval |
 |---|---|---|
@@ -77,7 +77,7 @@ The CPU and Memory cards also list the **top 5 processes**, scanned every 2 s on
 For development:
 
 ```sh
-swift test                      # 28 unit tests: parsers, store, system math, SMC decoding, processes
+swift test                      # 29 unit tests: parsers, store, display order, system math, SMC decoding, processes
 LIVE=1 swift test --filter live # print what each provider and the sampler return on this machine
 ./scripts/bundle.sh             # builds build/TokenBar.app (release, ad-hoc signed)
 open build/TokenBar.app

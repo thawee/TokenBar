@@ -36,7 +36,7 @@ public final class LimitsStore {
 
     /// Providers worth showing: anything with data, or an error other than "not set up".
     public var visible: [ProviderID] {
-        providers.map(\.id).filter { id in
+        ProviderID.displayOrder.filter { id in
             guard let state = states[id] else { return false }
             if state.reading != nil { return true }
             if case .notConfigured = state.error { return false }

@@ -5,6 +5,10 @@ public enum ProviderID: String, CaseIterable, Sendable, Identifiable {
 
     public var id: String { rawValue }
 
+    public static var displayOrder: [ProviderID] {
+        allCases.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+    }
+
     public var displayName: String {
         switch self {
         case .claude: "Claude Code"
