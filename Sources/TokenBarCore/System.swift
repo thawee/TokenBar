@@ -3,8 +3,9 @@ import Foundation
 import IOKit
 import Observation
 
+/// Declared in display order: processors, then capacity, then the slow sensor.
 public enum SystemMetric: String, CaseIterable, Sendable, Identifiable {
-    case cpu, memory, gpu, temperature
+    case cpu, gpu, memory, storage, temperature
 
     public var id: String { rawValue }
 
@@ -13,6 +14,7 @@ public enum SystemMetric: String, CaseIterable, Sendable, Identifiable {
         case .cpu: "CPU"
         case .memory: "Memory"
         case .gpu: "GPU"
+        case .storage: "Storage"
         case .temperature: "Temperature"
         }
     }
@@ -23,6 +25,9 @@ public struct SystemSnapshot: Sendable, Equatable {
     public var memoryUsed: UInt64?
     public var memoryTotal: UInt64
     public var gpuPercent: Double?
+    /// Boot volume capacity and used bytes, where free space includes purgeable space as in Finder.
+    public var storageUsed: UInt64?
+    public var storageTotal: UInt64?
     /// CPU die average and hottest point, and GPU die average, in °C (SMC).
     public var cpuTemperature: Double?
     public var cpuTemperatureMax: Double?
@@ -33,11 +38,17 @@ public struct SystemSnapshot: Sendable, Equatable {
         return Double(used) / Double(memoryTotal) * 100
     }
 
+    public var storagePercent: Double? {
+        guard let used = storageUsed, let total = storageTotal, total > 0 else { return nil }
+        return Double(used) / Double(total) * 100
+    }
+
     public func value(_ metric: SystemMetric) -> Double? {
         switch metric {
         case .cpu: cpuPercent
         case .memory: memoryPercent
         case .gpu: gpuPercent
+        case .storage: storagePercent
         case .temperature: cpuTemperature
         }
     }
@@ -57,6 +68,10 @@ public actor SystemSampler {
     private var lastTemps: (cpu: Double?, cpuMax: Double?, gpu: Double?)?
     private var lastTempsAt: ContinuousClock.Instant?
     private let tempsInterval: Duration = .seconds(10)
+    /// Disk usage changes slowly, so it is read every 30 s.
+    private var lastStorage: (used: UInt64, total: UInt64)?
+    private var lastStorageAt: ContinuousClock.Instant?
+    private let storageInterval: Duration = .seconds(30)
 
     public init() {
         gpuService = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOAccelerator"))
@@ -76,12 +91,18 @@ public actor SystemSampler {
             lastTemps = dies?.read()
             lastTempsAt = now
         }
+        if lastStorageAt.map({ now - $0 >= storageInterval }) ?? true {
+            lastStorage = storage()
+            lastStorageAt = now
+        }
         let temps = lastTemps
         return SystemSnapshot(
             cpuPercent: cpu,
             memoryUsed: memoryUsed(),
             memoryTotal: ProcessInfo.processInfo.physicalMemory,
             gpuPercent: gpuPercent(),
+            storageUsed: lastStorage?.used,
+            storageTotal: lastStorage?.total,
             cpuTemperature: temps?.cpu,
             cpuTemperatureMax: temps?.cpuMax,
             gpuTemperature: temps?.gpu
@@ -129,6 +150,19 @@ public actor SystemSampler {
         else { return nil }
         return value.doubleValue
     }
+
+    /// Boot volume, as Finder reports it. A fresh URL each time, because URL caches
+    /// resource values.
+    private func storage() -> (used: UInt64, total: UInt64)? {
+        let keys: Set<URLResourceKey> = [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey,
+                                         .volumeAvailableCapacityKey]
+        guard let values = try? URL(fileURLWithPath: "/").resourceValues(forKeys: keys),
+              let total = values.volumeTotalCapacity
+        else { return nil }
+        let available = values.volumeAvailableCapacityForImportantUsage ?? values.volumeAvailableCapacity.map(Int64.init)
+        guard let available else { return nil }
+        return SystemMath.storage(total: Int64(total), available: available)
+    }
 }
 
 struct CPUTicks: Equatable {
@@ -149,6 +183,12 @@ enum SystemMath {
                            compressedPages: UInt64, pageSize: UInt64) -> UInt64 {
         let app = internalPages > purgeablePages ? internalPages - purgeablePages : 0
         return (app + wiredPages + compressedPages) * pageSize
+    }
+
+    /// Used = total - available, clamped; nil for an empty volume.
+    static func storage(total: Int64, available: Int64) -> (used: UInt64, total: UInt64)? {
+        guard total > 0 else { return nil }
+        return (UInt64(min(max(total - available, 0), total)), UInt64(total))
     }
 
     static func average(_ values: [Double]) -> Double? {

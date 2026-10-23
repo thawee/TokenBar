@@ -75,15 +75,18 @@ struct DockMetrics {
     let headers: Bool
 }
 
-/// One ring on the rail: an AI tool's limit or a system metric.
+/// One ring on the rail: an AI tool's limit, a system metric, or a local model server
+/// (by port, which outlives a restarted server's pid).
 enum DockItem: Hashable, Identifiable {
     case provider(ProviderID)
     case metric(SystemMetric)
+    case local(port: Int)
 
     var id: String {
         switch self {
         case .provider(let p): "p." + p.rawValue
         case .metric(let m): "m." + m.rawValue
+        case .local(let port): "l.\(port)"
         }
     }
 }
@@ -103,8 +106,16 @@ final class DockSettings {
     var tools: Set<ProviderID> {
         didSet { defaults.set(tools.map(\.rawValue).sorted(), forKey: "dock.tools") }
     }
+    /// Local model servers that are looked for while the dock is visible.
+    var localServers: Set<LocalServerKind> {
+        didSet { defaults.set(localServers.map(\.rawValue).sorted(), forKey: "dock.local") }
+    }
     var metrics: Set<SystemMetric> {
         didSet { defaults.set(metrics.map(\.rawValue).sorted(), forKey: "dock.metrics") }
+    }
+    /// One ring for CPU (outside) and GPU (inside), when both are on.
+    var combineCompute: Bool {
+        didSet { defaults.set(combineCompute, forKey: "dock.combineCompute") }
     }
     /// Applies everywhere a limit is shown: dock, hover card, popover and menu bar.
     var limitDisplay: LimitDisplay {
@@ -117,17 +128,40 @@ final class DockSettings {
     init() {
         scale = defaults.object(forKey: "dock.scale") as? Double ?? DockScale.standard
         limitDisplay = LimitDisplay(rawValue: defaults.string(forKey: "limits.display") ?? "") ?? .used
+        combineCompute = defaults.bool(forKey: "dock.combineCompute")
         menuBar = MenuBarMode(rawValue: defaults.string(forKey: "menubar.mode") ?? "") ?? .urgent
         tools = (defaults.stringArray(forKey: "dock.tools")).map { Set($0.compactMap(ProviderID.init)) }
             ?? Set(ProviderID.allCases)
+        localServers = (defaults.stringArray(forKey: "dock.local")).map { Set($0.compactMap(LocalServerKind.init)) }
+            ?? Set(LocalServerKind.allCases)
         metrics = (defaults.stringArray(forKey: "dock.metrics")).map { Set($0.compactMap(SystemMetric.init)) }
             ?? Set(SystemMetric.allCases)
+        // Metrics added since the choice was saved start on. Lists saved before this
+        // key existed knew the original four.
+        let known = defaults.stringArray(forKey: "dock.metrics.known") ?? ["cpu", "gpu", "memory", "temperature"]
+        let added = SystemMetric.allCases.filter { !known.contains($0.rawValue) }
+        if !added.isEmpty {
+            metrics.formUnion(added)
+            defaults.set(metrics.map(\.rawValue).sorted(), forKey: "dock.metrics")
+        }
+        defaults.set(SystemMetric.allCases.map(\.rawValue), forKey: "dock.metrics.known")
     }
 
     func binding(for id: ProviderID) -> Binding<Bool> {
         Binding(get: { self.tools.contains(id) }, set: { on in
             if on { self.tools.insert(id) } else { self.tools.remove(id) }
         })
+    }
+
+    func binding(for kind: LocalServerKind) -> Binding<Bool> {
+        Binding(get: { self.localServers.contains(kind) }, set: { on in
+            if on { self.localServers.insert(kind) } else { self.localServers.remove(kind) }
+        })
+    }
+
+    /// Whether the CPU ring also carries GPU: combining is on and GPU is shown.
+    func combinesGPU(available: Set<SystemMetric>) -> Bool {
+        combineCompute && metrics.contains(.gpu) && available.contains(.gpu)
     }
 
     func binding(for metric: SystemMetric) -> Binding<Bool> {

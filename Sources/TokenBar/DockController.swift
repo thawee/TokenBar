@@ -9,6 +9,7 @@ import TokenBarCore
 final class DockController {
     private let store: LimitsStore
     private let system: SystemStore
+    private let local: LocalServerStore
     private let settings: DockSettings
     private var panel: NSPanel?
     private var hosting: DockHostingView?
@@ -41,9 +42,10 @@ final class DockController {
         set { defaults.set(newValue?.displayID ?? 0, forKey: "dock.display") }
     }
 
-    init(store: LimitsStore, system: SystemStore, settings: DockSettings) {
+    init(store: LimitsStore, system: SystemStore, local: LocalServerStore, settings: DockSettings) {
         self.store = store
         self.system = system
+        self.local = local
         self.settings = settings
         self.state = DockState(side: DockSide(rawValue: UserDefaults.standard.string(forKey: "dock.side") ?? "") ?? .right)
         NotificationCenter.default.addObserver(
@@ -69,9 +71,11 @@ final class DockController {
         updateSampling()
     }
 
-    /// System metrics are sampled only while someone can see them.
+    /// System metrics and local servers are sampled only while someone can see them.
     private func updateSampling() {
         system.setRunning(isVisible && !settings.metrics.isEmpty)
+        local.enabled = settings.localServers
+        local.setRunning(isVisible && !settings.localServers.isEmpty)
     }
 
     private func makePanel() {
@@ -94,6 +98,7 @@ final class DockController {
         let hosting = DockHostingView(rootView: DockView(
             store: store,
             system: system,
+            local: local,
             settings: settings,
             state: state,
             onDrag: { [weak self] ended in self?.handleDrag(ended: ended) },
@@ -122,7 +127,10 @@ final class DockController {
             _ = store.visible
             _ = settings.scale
             _ = settings.metrics
+            _ = settings.combineCompute
+            _ = settings.localServers
             _ = system.availableMetrics
+            _ = local.ports
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -158,7 +166,7 @@ final class DockController {
         let centerY = visible.minY + visible.height * centerFraction
         let y = min(max(centerY - size.height / 2, visible.minY), visible.maxY - size.height)
         let frame = NSRect(origin: NSPoint(x: x, y: y), size: size)
-        if animated {
+        if animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.22
                 context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -228,7 +236,7 @@ extension DockController {
         if case .metric(let metric)? = item { system.setProcessFocus(metric) } else { system.setProcessFocus(nil) }
         if let item {
             let hosting = cardHosting ?? makeCardPanel()
-            hosting.rootView = HoverCard(item: item, store: store, system: system, settings: settings)
+            hosting.rootView = HoverCard(item: item, store: store, system: system, local: local, settings: settings)
         }
         positionCard()
         observeCard()
@@ -270,6 +278,7 @@ extension DockController {
             case .metric:
                 _ = system.snapshot
                 _ = system.topProcesses
+            case .local: _ = local.servers
             }
         } onChange: { [weak self] in
             Task { @MainActor in
@@ -290,7 +299,7 @@ extension DockController {
         card.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         // Click-through, so it never steals the hover from the rail underneath.
         card.ignoresMouseEvents = true
-        let hosting = NSHostingView(rootView: HoverCard(item: .provider(.claude), store: store, system: system, settings: settings))
+        let hosting = NSHostingView(rootView: HoverCard(item: .provider(.claude), store: store, system: system, local: local, settings: settings))
         hosting.sizingOptions = [.intrinsicContentSize]
         card.contentView = hosting
         cardPanel = card

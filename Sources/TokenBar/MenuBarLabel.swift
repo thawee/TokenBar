@@ -30,8 +30,46 @@ struct MenuBarLabel: View {
                 Text(settings.limitDisplay.value(item.used).map { "\(Int($0.rounded()))%" } ?? "--")
                     .monospacedDigit()
             } else {
-                Image(systemName: "gauge.with.dots.needle.33percent")
+                Image(nsImage: .railGlyph)
+                    .accessibilityLabel("TokenBar")
             }
         }
     }
+}
+
+extension NSImage {
+    /// The app icon as a menu bar template: the rail outline holding three ring gauges.
+    @MainActor static let railGlyph: NSImage = {
+        let width: CGFloat = 8, height: CGFloat = 19
+        let pad: CGFloat = 1.6, line: CGFloat = 1.3
+        let fills: [CGFloat] = [0.72, 0.45, 0.88]  // as in the app icon
+        let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { rect in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            let corner = width / 2 - 0.5
+            ctx.addPath(CGPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5),
+                               cornerWidth: corner, cornerHeight: corner, transform: nil))
+            ctx.setStrokeColor(NSColor.black.withAlphaComponent(0.35).cgColor)
+            ctx.setLineWidth(1)
+            ctx.strokePath()
+
+            let ring = width - 2 * pad
+            let gap = (height - 2 * pad - 3 * ring) / 2
+            let radius = ring / 2 - line / 2
+            ctx.setLineWidth(line)
+            ctx.setLineCap(.round)
+            for (i, fill) in fills.enumerated() {
+                let center = CGPoint(x: width / 2, y: height - pad - ring / 2 - CGFloat(i) * (ring + gap))
+                ctx.addArc(center: center, radius: radius, startAngle: 0, endAngle: 2 * .pi, clockwise: false)
+                ctx.setStrokeColor(NSColor.black.withAlphaComponent(0.3).cgColor)
+                ctx.strokePath()
+                ctx.addArc(center: center, radius: radius, startAngle: .pi / 2,
+                           endAngle: .pi / 2 - 2 * .pi * fill, clockwise: true)
+                ctx.setStrokeColor(NSColor.black.cgColor)
+                ctx.strokePath()
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }()
 }

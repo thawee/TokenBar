@@ -1,0 +1,4 @@
+{"object":"list","data":[
+{"id":"flint","object":"model","type":"model","display_name":"/models/flint/kapitsa-iq3","created":1792725527,"created_at":"2026-10-23T03:18:47Z","owned_by":"nace","context_length":65536,"context_fit":65536,"slots":1,"active":true,"downloaded":true},
+{"id":"qwen3.5-4b:4bit","object":"model","type":"model","display_name":"Qwen3.5-4B (4bit)","short_name":"4b","about":"small and quick: for 16-24 GB Macs and simple tasks","created":1792727701,"created_at":"2026-10-23T03:55:01Z","owned_by":"nace","active":false,"downloaded":false}
+]}

@@ -53,7 +53,7 @@ public enum ProcessSampler {
         }
     }
 
-    private static func footprint(_ pid: pid_t) -> UInt64? {
+    static func footprint(_ pid: pid_t) -> UInt64? {
         var info = rusage_info_v4()
         let result = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {

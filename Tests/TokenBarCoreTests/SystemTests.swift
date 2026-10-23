@@ -53,6 +53,17 @@ import Testing
     #expect(s.value(.memory) == 25)
     #expect(s.value(.gpu) == 40)
     #expect(s.value(.temperature) == 66)
+    #expect(s.value(.storage) == nil, "storage not read yet")
+    let disk = SystemSnapshot(memoryTotal: 0, storageUsed: 300, storageTotal: 1000)
+    #expect(disk.value(.storage) == 30)
+}
+
+@Test func storageUsedIsTotalMinusAvailableClamped() {
+    #expect(SystemMath.storage(total: 1000, available: 250)! == (750, 1000))
+    // Available can exceed total when purgeable space is counted; never underflow.
+    #expect(SystemMath.storage(total: 1000, available: 1200)! == (0, 1000))
+    #expect(SystemMath.storage(total: 1000, available: -5)! == (1000, 1000))
+    #expect(SystemMath.storage(total: 0, available: 0) == nil)
 }
 
 /// Reads the real sensors. Run with `LIVE=1 swift test --filter liveSystem`.
@@ -65,6 +76,7 @@ func liveSystemSample() async throws {
     print("LIVE system:", s)
     #expect(s.cpuPercent != nil)
     #expect(s.memoryUsed != nil)
+    #expect(s.storagePercent != nil)
 }
 
 @MainActor @Test func systemStoreStopsPublishingWhenStopped() async throws {

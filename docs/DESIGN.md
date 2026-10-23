@@ -1,11 +1,11 @@
 # TokenBar design
 
-Status: implemented (v0.2.1). Last updated 2026-10-18.
+Status: implemented (v0.2.1 plus unreleased changes, see CHANGELOG). Last updated 2026-10-23.
 
 ## 1. Goals
 
 1. Show how close each AI coding tool is to its plan limit (5-hour, weekly, monthly) without opening each tool.
-2. Show the system load that matters when running local models: CPU, memory, GPU, temperature.
+2. Show the system load that matters when running local models: CPU, GPU, memory, storage, temperature.
 3. Stay lightweight: under 1 MB on disk, under about 30 MB of memory, well under 1% CPU at steady state.
 4. Never put the user's accounts at risk: read credentials only, never refresh or write them.
 
@@ -24,6 +24,7 @@ TokenBarApp (SwiftUI App, LSUIElement)
  │   └─ LimitsPanel: provider sections, Customize
  ├─ LimitsStore ──── providers: Claude, Codex, Copilot, Antigravity
  ├─ SystemStore ──── SystemSampler (actor) ── Mach, IOKit, SMC
+ ├─ LocalServerStore ─ LocalServerProbe ── process scan, HTTP on 127.0.0.1
  ├─ DockSettings ─── UserDefaults
  └─ DockController
      ├─ NSPanel (rail)  ── DockHostingView<DockView>
@@ -32,7 +33,7 @@ TokenBarApp (SwiftUI App, LSUIElement)
 
 There are two targets:
 
-- **TokenBarCore** (library, no UI): models, parsers, providers, the stores, the system sampler and the SMC reader. Everything with logic lives here so it can be unit-tested.
+- **TokenBarCore** (library, no UI): models, parsers, providers, the stores, the system sampler, the SMC reader and the local server probe. Everything with logic lives here so it can be unit-tested.
 - **TokenBar** (executable): SwiftUI views, the AppKit panels and settings.
 
 There are no package dependencies. `scripts/bundle.sh` wraps the release binary in an `.app` with `LSUIElement` (no Dock icon) and signs it ad hoc.
@@ -85,7 +86,7 @@ The used percentage is stored. `LimitWindow.currentUsedPercent(now:)` returns `0
 
 Each tool is represented by its headline window (`LimitsReading.headlineWindow`): the 5-hour window, or its first window if it has none, as with Copilot's monthly quota. The dock rings and the menu bar both use it. `LimitsStore.mostUrgent()` picks the visible tool with the highest headline usage, skipping windows whose reset time has passed.
 
-The menu bar (`MenuBarMode`) shows the most urgent tool's logo and number by default, a pinned tool, or just the gauge icon until a limit passes 70% used. Logos are drawn as 16 pt template images, so they follow the menu bar's light or dark appearance. Antigravity's multicolor logo becomes a silhouette.
+The menu bar (`MenuBarMode`) shows the most urgent tool's logo and number by default, a pinned tool, or just the TokenBar glyph until a limit passes 70% used. The glyph is the app icon redrawn as an 8 by 19 pt template (`NSImage.railGlyph`): the rail outline with three ring gauges. Logos are drawn as 16 pt template images, so they follow the menu bar's light or dark appearance. Antigravity's multicolor logo becomes a silhouette.
 
 `ProviderID.displayOrder` sorts tools by display name. The dock, popover, menu bar picker, and settings use this order.
 
@@ -98,8 +99,9 @@ The menu bar popover (`LimitsPanel`) uses `ViewThatFits(in: .vertical)` to size 
 | Metric | Method | Cost per read |
 |---|---|---|
 | CPU | `host_statistics(HOST_CPU_LOAD_INFO)`, busy/total tick delta between samples | under 0.01 ms |
-| Memory | `host_statistics64(HOST_VM_INFO64)`: (internal − purgeable + wired + compressor) × page size | under 0.01 ms |
 | GPU | `IORegistryEntryCreateCFProperty(PerformanceStatistics)["Device Utilization %"]` | about 0.003 ms |
+| Memory | `host_statistics64(HOST_VM_INFO64)`: (internal − purgeable + wired + compressor) × page size | under 0.01 ms |
+| Storage | `URL.resourceValues` on `/`: total capacity minus available-for-important-usage (purgeable counts as free, as in Finder), refreshed every 30 s | about 7 ms (28 ms the first time): computing purgeable space is the slow part |
 | Temperature | SMC, refreshed every 10 s (see below) | a few ms |
 
 `SystemStore` samples every 2 s, and only while the dock is visible and at least one metric is enabled. The loop uses throwing sleeps, so stopping it never publishes a stale sample.
@@ -124,6 +126,24 @@ Apple documents no temperature API for Apple Silicon. `DieTemperatures` picks a 
 Readings outside 15–130 °C are dropped. Idle, power-gated clusters report sentinel values of about −4 to 5 °C, and some `T` keys are not temperatures.
 
 The SMC is read through the `AppleSMC` user client (selector 2), which needs no root. `SMCKeyData` must match the kernel's 80-byte layout. `KeyInfo` carries explicit tail padding, because Swift would otherwise place the following fields into it. A unit test pins the offsets: this exact bug made the first version return no temperatures.
+
+### Local model servers
+
+`LocalServerStore` polls every 5 s while the dock is visible and a server kind is turned on. Each poll:
+
+1. Scans processes (`LocalServerProbe.scan`): `proc_listallpids`, then `proc_name`, and reads argv (`KERN_PROCARGS2`) only for processes named `kapitsa` or `python…`. `LocalServerParsing.identify` takes `kapitsa serve` and Splash's `python3 -m server.server … --binary …/splash/…` (what `splash serve` execs into). `kapitsa claude` and other agent commands are not servers. Measured: 1.9 ms for the whole scan.
+2. Keeps one process per port (the one with the larger footprint, so a launcher and the server it starts count once).
+3. Reads each server over plain HTTP on 127.0.0.1 with a 3 s timeout, one at a time. The bundle allows this with `NSAllowsLocalNetworking`.
+4. Merges with the last reading (`LocalServerParsing.merge`): a server that answered before and misses a poll keeps its fields, marked "not answering", since a server busy generating can be slow to answer. Kapitsa's memory is still fresh, from the process. A port that has never answered shows "Starting".
+
+| | Kapitsa | Splash |
+|---|---|---|
+| Ring | process physical footprint ÷ `--mem-budget` (GiB) | `memory_actual.current_bytes` ÷ `memory_governor.limit_bytes` |
+| No budget given | `MTLDevice.recommendedMaxWorkingSetSize`, read once (about 2 MB and 60 ms the first time) | n/a |
+| Card | model (the id when the name is a path), context, slots | model, average decode and prefill tokens/s, tokens in and out, requests, queue |
+| Never answered, or not ready | "Starting" | "Starting" (also when `ready` is false) |
+
+Kapitsa's footprint includes the weights: 16 GB for a 15 GB model, as `top` shows. The `/status` field paths for Splash come from its `metrics.py` (Splash 1.4.0); a live Splash server has not been read yet. Local rings ignore Used/Remaining, are red at 90%, and stay out of the menu bar and `mostUrgent`. `DockItem.local` is keyed by port, which survives a server restart. The rail lays out again only when `ports` changes, not on every poll.
 
 ## 5. Side dock
 
@@ -157,12 +177,13 @@ The card is a second, click-through panel (`ignoresMouseEvents`), so it never ta
 
 **Open at login** uses `SMAppService.mainApp`. The system registration is the source of truth: the toggle reads `status` instead of a saved flag, so it reflects changes made in System Settings. The first launch registers once (tracked by `loginItem.configured`), and after that only the toggle changes it, so turning it off sticks. `requiresApproval` shows a link to System Settings > Login Items. Verified on macOS 26: an ad-hoc-signed build in `~/Applications` registered as `enabled` with no prompt.
 
-`DockSettings` is backed by UserDefaults (`dock.scale`, `dock.tools`, `dock.metrics`, `limits.display`, `menubar.mode`, plus `dock.visible`, `dock.side`, `dock.center` and `dock.display`). The enabled tools feed `LimitsStore.enabled`, so turning a tool off also stops it being fetched.
+`DockSettings` is backed by UserDefaults (`dock.scale`, `dock.tools`, `dock.metrics`, `dock.local`, `limits.display`, `menubar.mode`, plus `dock.visible`, `dock.side`, `dock.center` and `dock.display`). The enabled tools feed `LimitsStore.enabled`, so turning a tool off also stops it being fetched.
 
 ## 7. Decisions and rejected alternatives
 
 | Decision | Alternative rejected | Why |
 |---|---|---|
+| One alert cue beyond color: a faint red disc inside the ring | Red arc and red number only | Claude's brand tint is 0.074 from the alert red in OKLab, the closest pair on the rail. In a screenshot a healthy Claude ring (93% left) and a 93% full disk looked alike. |
 | Native SwiftUI + AppKit | Electron (as in Token Monitor) | The size and memory goals. Measured: 668 KB bundle, 23 to 47 MB of memory. |
 | Read the Claude token, never refresh it | Refresh it with `console.anthropic.com/v1/oauth/token` | Refreshing can rotate the token Claude Code holds and sign it out. On macOS, Token Monitor refreshes but does not write back to the Keychain. |
 | `/usr/bin/security` for the Keychain read | `SecItemCopyMatching` | The item's access list already trusts `security`. A native read from an ad-hoc-signed app prompts again after every rebuild. |
@@ -182,7 +203,7 @@ Measured on an M3 Pro (36 GB) running macOS 26:
 
 | | Value |
 |---|---|
-| Bundle size | 684 KB |
+| Bundle size | 1,052 KiB, of which the app icon is 236 KiB and the binary 799 KiB. Over the 1 MB goal by the icon. |
 | Memory (physical footprint) | 19 MB menu bar only; 23 to 47 MB with the dock and all metrics, varying between runs. Flat at 47 MB over 4 minutes in the latest run, so not growing. |
 | Steady CPU with the dock and all metrics | 0.29 s per 60 s, about 0.5% |
 | First sample | 0.32 s, once, off the main thread (SMC key walk for the GPU keys) |
@@ -192,8 +213,8 @@ The first minute after launch costs more (about 1 s of CPU), for the initial fet
 
 ## 9. Testing
 
-- **Unit tests** (`swift test`, 29): the parsers for all four tools (including Antigravity CLI `/quota` JSON) against fixtures, Codex and window reset expiry handling, ISO dates with microseconds, store intervals, retry after failure, the force floor, enabled tools, display order, headline staleness, CPU tick math, the memory formula, SMC struct layout and decoders, and sampler stop.
-- **Live tests** (`LIVE=1`): call the real providers and sampler on this machine, printing values, never tokens.
+- **Unit tests** (`swift test`, 39): the parsers for all four tools (including Antigravity CLI `/quota` JSON) against fixtures, Codex and window reset expiry handling, ISO dates with microseconds, store intervals, retry after failure, the force floor, enabled tools, display order, headline staleness, CPU tick math, the memory formula, storage clamping, SMC struct layout and decoders, sampler stop, and local servers (argv matching with both `--port 8001` and `--port=8001`, KERN_PROCARGS2 parsing, Kapitsa `/v1/models` and Splash `/status` fixtures, missing fields, keeping the last reading after a missed poll).
+- **Live tests** (`LIVE=1`): call the real providers, sampler and local servers on this machine, printing values, never tokens.
 - **Visual checks:** the dock and cards were rendered off-screen with `ImageRenderer` (both sizes, both sides, used and remaining).
 
 ## 10. Risks

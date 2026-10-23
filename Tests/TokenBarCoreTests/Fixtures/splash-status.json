@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "ready": true,
+  "instance": {"id": "a1b2", "pid": 4242, "model": "/cache/splash/models/Qwen3.8-27B-GGUF", "host": "127.0.0.1", "port": 8001, "started_at": 1792725527.5},
+  "memory_actual": {"current_bytes": 18253611008, "peak_bytes": 19327352832},
+  "memory_governor": {"limit_bytes": 25769803776, "headroom_bytes": 7516192768, "denied_reservations": 0},
+  "metrics": {"prefill_input_tokens": 182340, "prefill_tokens_per_second": 612.4, "decode_output_tokens": 20511, "decode_tokens_per_second": 38.7},
+  "requests": {"completed": 57, "cancelled": 1, "failed": 0},
+  "scheduler": {"queued": 2, "decoding": 1}
+}

@@ -73,12 +73,43 @@ extension ProviderID {
     }
 }
 
+extension LocalServerKind {
+    var tint: Color {
+        switch self {
+        case .kapitsa: Color(red: 0.82, green: 0.90, blue: 0.32)
+        case .splash: Color(red: 0.62, green: 0.70, blue: 1.0)
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .kapitsa: "atom"
+        case .splash: "drop.fill"
+        }
+    }
+}
+
+extension LocalServer {
+    /// What VoiceOver reads for the ring.
+    var spoken: String {
+        switch status {
+        case .loading: return "Starting"
+        case .notAnswering: return "Not answering"
+        case .locked: return "Needs an API key"
+        case .ready:
+            guard let percent = memoryPercent else { return "Running" }
+            return "Memory \(Int(percent.rounded())) percent of its limit" + (model.map { ", \($0)" } ?? "")
+        }
+    }
+}
+
 extension SystemMetric {
     var tint: Color {
         switch self {
         case .cpu: Color(red: 0.33, green: 0.82, blue: 0.80)
         case .memory: Color(red: 0.45, green: 0.85, blue: 0.48)
         case .gpu: Color(red: 0.96, green: 0.45, blue: 0.70)
+        case .storage: Color(red: 0.35, green: 0.75, blue: 1.0)
         case .temperature: Color(red: 0.98, green: 0.72, blue: 0.30)
         }
     }
@@ -87,7 +118,8 @@ extension SystemMetric {
         switch self {
         case .cpu: "cpu"
         case .memory: "memorychip"
-        case .gpu: "cube.transparent"
+        case .gpu: "cube.fill"
+        case .storage: "internaldrive"
         case .temperature: "thermometer.medium"
         }
     }
@@ -100,6 +132,17 @@ extension SystemMetric {
     }
 
     func isAlert(_ value: Double) -> Bool { value >= 90 }
+
+    /// What VoiceOver reads for a value.
+    func spoken(_ value: Double?) -> String {
+        guard let value else { return "Measuring" }
+        let n = Int(value.rounded())
+        switch self {
+        case .temperature: return "\(n) degrees Celsius"
+        case .storage: return "\(n) percent full"
+        default: return "\(n) percent"
+        }
+    }
 }
 
 /// State the controller changes without rebuilding the view tree.
@@ -126,11 +169,13 @@ private struct RingFramesKey: PreferenceKey {
     }
 }
 
-private let alertRed = Color(red: 1, green: 0.45, blue: 0.4)
+/// Lightest red that keeps 4.5:1 for the alert number on the rail's top color.
+private let alertRed = Color(red: 1, green: 0.48, blue: 0.42)
 
 struct DockView: View {
     let store: LimitsStore
     let system: SystemStore
+    let local: LocalServerStore
     let settings: DockSettings
     let state: DockState
     let onDrag: (_ ended: Bool) -> Void
@@ -138,26 +183,42 @@ struct DockView: View {
 
     private var m: DockMetrics { settings.dockMetrics }
 
-    /// Enabled metrics this Mac can report, in a fixed order.
+    /// Enabled metrics this Mac can report, in a fixed order. GPU folds into the CPU
+    /// ring when combined.
     private var metrics: [SystemMetric] {
-        SystemMetric.allCases.filter { settings.metrics.contains($0) && system.availableMetrics.contains($0) }
+        let shown = SystemMetric.allCases.filter { settings.metrics.contains($0) && system.availableMetrics.contains($0) }
+        return isCombined && shown.contains(.cpu) ? shown.filter { $0 != .gpu } : shown
     }
+
+    private var isCombined: Bool { settings.combinesGPU(available: system.availableMetrics) }
 
     var body: some View {
         VStack(spacing: m.spacing) {
             if !metrics.isEmpty {
                 header("SYSTEM")
                 ForEach(metrics) { metric in
-                    let value = system.snapshot?.value(metric)
+                    let gpu = metric == .cpu && isCombined ? system.snapshot?.value(.gpu) : nil
+                    let own = system.snapshot?.value(metric)
+                    // Combined, the label shows the busier of the two.
+                    let value = gpu.map { max($0, own ?? 0) } ?? own
                     ring(.metric(metric)) {
                         RingGauge(m: m, tint: metric.tint, value: value,
-                                  fraction: value.map(metric.fraction) ?? 0,
+                                  fraction: own.map(metric.fraction) ?? 0,
                                   label: { $0.map(metric.label) ?? "--" }, alert: metric.isAlert,
-                                  highlighted: state.hovered == .metric(metric), animated: false) {
+                                  highlighted: state.hovered == .metric(metric), animated: false,
+                                  inner: metric == .cpu && isCombined
+                                    ? InnerRing(tint: SystemMetric.gpu.tint, value: gpu) : nil,
+                                  ringAlert: own.map(metric.isAlert) == true) {
                             Image(systemName: metric.symbol)
-                                .font(.system(size: m.logo * 0.72, weight: .semibold))
+                                .font(.system(size: metric == .cpu && isCombined
+                                                ? max(10, m.logo * 0.55) : max(10, m.logo * 0.72),
+                                              weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.92))
                         }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(gpu == nil ? metric.displayName : "CPU and GPU")
+                        .accessibilityValue(gpu == nil ? metric.spoken(own)
+                                            : "CPU \(metric.spoken(own)), GPU \(SystemMetric.gpu.spoken(gpu))")
                     }
                 }
             }
@@ -178,10 +239,35 @@ struct DockView: View {
                                   highlighted: state.hovered == .provider(id)) {
                             ProviderLogo(id: id, size: m.logo)
                         }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(id.displayName)
+                        .accessibilityValue(spokenLimit(providerState, shown: shown))
                     }
                 }
             }
-            if store.visible.isEmpty && metrics.isEmpty {
+            if !local.servers.isEmpty && !(store.visible.isEmpty && metrics.isEmpty) {
+                Capsule().fill(.white.opacity(0.14)).frame(width: m.ring * 0.6, height: 1)
+            }
+            if !local.servers.isEmpty {
+                header("LOCAL")
+                ForEach(local.servers) { server in
+                    let percent = server.memoryPercent
+                    ring(.local(port: server.port)) {
+                        RingGauge(m: m, tint: server.kind.tint, value: percent,
+                                  fraction: min((percent ?? 0) / 100, 1),
+                                  label: percentText, alert: { $0 >= 90 },
+                                  highlighted: state.hovered == .local(port: server.port), animated: false) {
+                            Image(systemName: server.kind.symbol)
+                                .font(.system(size: max(10, m.logo * 0.72), weight: .semibold))
+                                .foregroundStyle(.white.opacity(server.status == .ready ? 0.92 : 0.55))
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(server.kind.displayName)
+                        .accessibilityValue(server.spoken)
+                    }
+                }
+            }
+            if store.visible.isEmpty && metrics.isEmpty && local.servers.isEmpty {
                 Image(systemName: "gauge.with.dots.needle.33percent")
                     .font(.system(size: m.logo * 0.8))
                     .foregroundStyle(.white.opacity(0.5))
@@ -223,6 +309,16 @@ struct DockView: View {
             Divider()
             Button("Quit TokenBar") { NSApplication.shared.terminate(nil) }
         }
+    }
+
+    /// The headline window as the hover card would show it: name, number, reset, error.
+    private func spokenLimit(_ state: ProviderState?, shown: Double?) -> String {
+        let window = state?.reading?.headlineWindow
+        var parts = [shown.map { "\(window?.label ?? "Limit") \(Int($0.rounded())) percent \(settings.limitDisplay.word)" }
+                     ?? "No reading"]
+        if let resetsAt = window?.resetsAt { parts.append(resetText(resetsAt)) }
+        if let error = state?.error { parts.append(error.message) }
+        return parts.joined(separator: ", ")
     }
 
     @ViewBuilder private func header(_ text: String) -> some View {
@@ -272,6 +368,12 @@ private func percentText(_ value: Double?) -> String {
     value.map { "\(Int($0.rounded()))%" } ?? "--"
 }
 
+/// A second ring inside the main one, for a combined CPU and GPU slot.
+struct InnerRing {
+    let tint: Color
+    let value: Double?
+}
+
 struct RingGauge<Center: View>: View {
     let m: DockMetrics
     let tint: Color
@@ -284,20 +386,40 @@ struct RingGauge<Center: View>: View {
     /// Off for system metrics: they change every 2 s, and animating each change keeps
     /// SwiftUI redrawing at display rate.
     var animated = true
+    var inner: InnerRing?
+    /// The outer arc's own alert state, when the label shows another value (combined).
+    var ringAlert: Bool?
     @ViewBuilder let center: () -> Center
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isAlert: Bool { value.map(alert) == true }
+    private var isRingAlert: Bool { ringAlert ?? isAlert }
 
     var body: some View {
         VStack(spacing: m.headers ? 5 : 3) {
             ZStack {
                 Circle().fill(.white.opacity(highlighted ? 0.08 : 0))
+                // A filled disc, so an alert does not rest on arc color alone (Claude's
+                // brand color is close to the alert red).
+                Circle().fill(alertRed.opacity(isAlert ? 0.22 : 0))
                 Circle().stroke(.white.opacity(0.10), lineWidth: m.line)
                 Circle()
                     .trim(from: 0, to: fraction)
-                    .stroke(isAlert ? alertRed : tint, style: StrokeStyle(lineWidth: m.line, lineCap: .round))
+                    .stroke(isRingAlert ? alertRed : tint, style: StrokeStyle(lineWidth: m.line, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                    .animation(animated ? .easeOut(duration: 0.6) : nil, value: fraction)
+                    .animation(animated && !reduceMotion ? .easeOut(duration: 0.6) : nil, value: fraction)
+                if let inner {
+                    let fill = inner.value.map { min(max($0 / 100, 0), 1) } ?? 0
+                    ZStack {
+                        Circle().stroke(.white.opacity(0.10), lineWidth: m.line)
+                        Circle()
+                            .trim(from: 0, to: fill)
+                            .stroke(inner.value.map(alert) == true ? alertRed : inner.tint,
+                                    style: StrokeStyle(lineWidth: m.line, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                    }
+                    .padding(m.line * 1.75)
+                }
                 center()
                     .opacity(hasError && value == nil ? 0.55 : 1)
             }
@@ -311,8 +433,8 @@ struct RingGauge<Center: View>: View {
                 }
             }
             .frame(width: m.ring, height: m.ring)
-            .scaleEffect(highlighted ? 1.08 : 1)
-            .animation(.easeOut(duration: 0.15), value: highlighted)
+            .scaleEffect(highlighted && !reduceMotion ? 1.08 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: highlighted)
             Text(label(value))
                 .font(.system(size: m.font, weight: .semibold).monospacedDigit())
                 .foregroundStyle(isAlert || (hasError && value == nil) ? alertRed : .white.opacity(0.9))
@@ -326,6 +448,7 @@ struct HoverCard: View {
     let item: DockItem
     let store: LimitsStore
     let system: SystemStore
+    let local: LocalServerStore
     let settings: DockSettings
 
     static let width: CGFloat = 232
@@ -335,8 +458,17 @@ struct HoverCard: View {
             switch item {
             case .provider(let id): LimitCardContent(id: id, state: store.states[id], display: settings.limitDisplay)
             case .metric(let metric):
-                MetricCardContent(metric: metric, snapshot: system.snapshot,
-                                  processes: system.processMetric == metric ? system.topProcesses : nil)
+                VStack(alignment: .leading, spacing: 14) {
+                    MetricCardContent(metric: metric, snapshot: system.snapshot,
+                                      processes: system.processMetric == metric ? system.topProcesses : nil)
+                    if metric == .cpu && settings.combinesGPU(available: system.availableMetrics) {
+                        MetricCardContent(metric: .gpu, snapshot: system.snapshot, processes: nil)
+                    }
+                }
+            case .local(let port):
+                if let server = local.servers.first(where: { $0.port == port }) {
+                    LocalCardContent(server: server)
+                }
             }
         }
         .foregroundStyle(.white)
@@ -406,7 +538,7 @@ private struct LimitCardContent: View {
             }
             if let observed = state?.reading?.observedAt {
                 Text("Updated \(observed, format: .relative(presentation: .named))")
-                    .font(.system(size: 9)).foregroundStyle(.white.opacity(0.4))
+                    .font(.system(size: 10)).foregroundStyle(.white.opacity(0.55))
             }
         }
     }
@@ -452,11 +584,83 @@ private struct MetricCardContent: View {
             return ["\(gb(used)) of \(gb(s.memoryTotal)) GB used", "App memory, wired and compressed"]
         case .gpu:
             return ["Includes drawing the screen, not only local models"]
+        case .storage:
+            guard let used = s.storageUsed, let total = s.storageTotal else { return [] }
+            // Three significant digits: "462 GB", not "462.47 GB".
+            let formatter = ByteCountFormatter()
+            formatter.isAdaptive = false
+            let size = { (bytes: UInt64) in formatter.string(fromByteCount: Int64(bytes)) }
+            return ["\(size(used)) of \(size(total)) used", "\(size(total - used)) available, as in Finder"]
         case .temperature:
             let c = { (label: String, value: Double?) in value.map { String(format: "%@ %.1f°C", label, $0) } }
             return [c("CPU die average", s.cpuTemperature), c("CPU hottest point", s.cpuTemperatureMax),
                     c("GPU die average", s.gpuTemperature)].compactMap { $0 }
         }
+    }
+}
+
+private struct LocalCardContent: View {
+    let server: LocalServer
+
+    private var percent: Double? { server.memoryPercent }
+    private var isAlert: Bool { (percent ?? 0) >= 90 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: server.kind.symbol).font(.system(size: 13, weight: .semibold))
+                Text(server.kind.displayName).font(.system(size: 13, weight: .semibold))
+                Spacer(minLength: 4)
+                Text(percentText(percent))
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(isAlert ? alertRed : .white)
+            }
+            UsageBar(fraction: (percent ?? 0) / 100, tint: isAlert ? alertRed : server.kind.tint)
+            ForEach(details, id: \.self) { line in
+                Text(line).font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
+            }
+        }
+    }
+
+    private var details: [String] {
+        let gb = { (bytes: UInt64) in String(format: "%.1f", Double(bytes) / 1_073_741_824) }
+        let count = { (n: Int) in n.formatted(.number.notation(.compactName)) }
+        var lines: [String] = []
+        switch server.status {
+        case .loading: lines.append("Starting: the server does not answer yet")
+        case .notAnswering: lines.append("Not answering (busy?): last reading shown")
+        case .locked: lines.append("API key set, so model details are hidden")
+        case .ready: break
+        }
+        if let model = server.model { lines.append(model) }
+        if let used = server.memoryUsed {
+            let limit = server.memoryLimit.map { " of \(gb($0))" } ?? ""
+            let source = switch server.limitSource {
+            case .budget?: " (--mem-budget)"
+            case .gpuDefault?: " (macOS GPU limit)"
+            case .server?: " (\(server.kind.displayName) limit)"
+            case nil: ""
+            }
+            lines.append("\(gb(used))\(limit) GB\(source)")
+        }
+        if let context = server.contextLength {
+            let slots = server.slots.map { $0 == 1 ? ", 1 request at a time" : ", \($0) requests at a time" } ?? ""
+            // Context sizes are powers of two: 65,536 is "64K", as the servers write it.
+            let size = context % 1024 == 0 ? "\(context / 1024)K" : count(context)
+            lines.append("\(size) context\(slots)")
+        }
+        if let decode = server.decodeTokensPerSecond {
+            let prefill = server.prefillTokensPerSecond.map { String(format: ", reads %.0f", $0) } ?? ""
+            lines.append(String(format: "Writes %.1f tokens/s", decode) + prefill + " (average)")
+        }
+        if let input = server.inputTokens, let output = server.outputTokens {
+            lines.append("\(count(input)) tokens in, \(count(output)) out")
+        }
+        if let completed = server.requestsCompleted {
+            lines.append("\(completed) requests" + (server.queued.map { $0 > 0 ? ", \($0) waiting" : "" } ?? ""))
+        }
+        lines.append("Port \(server.port)")
+        return lines
     }
 }
 
@@ -467,8 +671,8 @@ private struct ProcessList: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(metric == .cpu ? "TOP PROCESSES" : "TOP PROCESSES (YOURS)")
-                .font(.system(size: 9, weight: .semibold)).tracking(0.6)
-                .foregroundStyle(.white.opacity(0.45))
+                .font(.system(size: 10, weight: .semibold)).tracking(0.6)
+                .foregroundStyle(.white.opacity(0.55))
                 .padding(.top, 4)
             if processes.isEmpty {
                 ForEach(0..<5, id: \.self) { row in
@@ -493,7 +697,7 @@ private struct ProcessList: View {
             }
             if metric == .cpu {
                 Text("Percent of one core, like Activity Monitor")
-                    .font(.system(size: 9)).foregroundStyle(.white.opacity(0.4))
+                    .font(.system(size: 10)).foregroundStyle(.white.opacity(0.55))
             }
         }
     }

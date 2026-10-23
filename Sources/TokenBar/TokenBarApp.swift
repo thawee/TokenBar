@@ -15,7 +15,7 @@ struct TokenBarApp: App {
         store.enabled = settings.tools
         _store = State(initialValue: store)
         _settings = State(initialValue: settings)
-        _dock = State(initialValue: DockController(store: store, system: SystemStore(), settings: settings))
+        _dock = State(initialValue: DockController(store: store, system: SystemStore(), local: LocalServerStore(), settings: settings))
     }
 
     var body: some Scene {
@@ -200,6 +200,13 @@ struct CustomizeSection: View {
             group("System", note: "Whole Mac, so a local model shows up as GPU and memory load.") {
                 ForEach(SystemMetric.allCases) { metric in
                     Toggle(metric.displayName, isOn: settings.binding(for: metric))
+                }
+                Toggle("Combine CPU and GPU in one ring", isOn: $settings.combineCompute)
+                    .disabled(!settings.metrics.isSuperset(of: [.cpu, .gpu]))
+            }
+            group("Local models", note: "Shown while the server runs: memory used of its limit.") {
+                ForEach(LocalServerKind.allCases) { kind in
+                    Toggle(kind.displayName, isOn: settings.binding(for: kind))
                 }
             }
         }
