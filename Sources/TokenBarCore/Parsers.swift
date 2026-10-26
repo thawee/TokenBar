@@ -28,14 +28,17 @@ public enum Parsers {
 
     // MARK: Codex: last `token_count` event in ~/.codex/sessions/**/*.jsonl
 
-    /// Returns the `rate_limits` of the last event in `text` that carries one, or nil.
+    /// Returns the `rate_limits` of the last event in `text` that carries a window, or nil.
     /// A partial first line (from reading only the file's tail) fails to parse and is skipped.
+    /// Once the limit is hit, Codex appends a `limit_id: "premium"` event with null windows,
+    /// which would otherwise hide the real reading.
     public static func codexLastRateLimits(_ text: Substring) -> [String: Any]? {
         for line in text.split(separator: "\n").reversed() where line.contains("\"rate_limits\"") {
             guard
                 let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
                 let payload = obj["payload"] as? [String: Any],
-                let limits = payload["rate_limits"] as? [String: Any]
+                let limits = payload["rate_limits"] as? [String: Any],
+                limits["primary"] is [String: Any] || limits["secondary"] is [String: Any]
             else { continue }
             return limits
         }

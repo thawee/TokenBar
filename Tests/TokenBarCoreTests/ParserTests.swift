@@ -42,6 +42,17 @@ private func fixture(_ name: String) throws -> Data {
     #expect(Parsers.codexLastRateLimits(#"{"type":"event_msg","payload":{"rate_limits":null}}"#[...]) == nil)
 }
 
+@Test func codexSkipsTrailingEventWithoutWindows() throws {
+    // Shape Codex writes after the usage limit is hit (seen 2026-10-26).
+    let text = #"""
+    {"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"window_minutes":300,"resets_at":1792990959},"secondary":{"used_percent":47.0,"window_minutes":10080,"resets_at":1793513602}}}}
+    {"type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"premium","primary":null,"secondary":null,"plan_type":null}}}
+    """#
+    let limits = try #require(Parsers.codexLastRateLimits(text[...]))
+    let reading = Parsers.codex(limits, observedAt: Date(timeIntervalSince1970: 1_792_980_000), now: Date(timeIntervalSince1970: 1_792_980_000))
+    #expect(reading.windows.map(\.usedPercent) == [100, 47])
+}
+
 @Test func copilotSkipsUnlimitedAndConvertsRemaining() throws {
     let reading = try Parsers.copilot(fixture("copilot-user.json"))
     #expect(reading.plan == "business")
