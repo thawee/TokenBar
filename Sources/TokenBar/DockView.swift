@@ -72,7 +72,7 @@ extension ProviderID {
         }
     }
 
-    /// Opened when the tool's ring is clicked: its usage page where one exists.
+    /// Opened from the dock's context menu: the tool's usage page where one exists.
     var webURL: URL {
         switch self {
         case .claude: URL(string: "https://claude.ai/settings/usage")!
@@ -249,13 +249,9 @@ struct DockView: View {
                                   highlighted: state.hovered == .provider(id)) {
                             ProviderLogo(id: id, size: m.logo)
                         }
-                        .contentShape(Rectangle())
-                        .onTapGesture { NSWorkspace.shared.open(id.webURL) }
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(id.displayName)
                         .accessibilityValue(spokenLimit(providerState, shown: shown))
-                        .accessibilityAddTraits(.isButton)
-                        .accessibilityAction { NSWorkspace.shared.open(id.webURL) }
                     }
                 }
             }
@@ -313,6 +309,13 @@ struct DockView: View {
                 Task { await store.refresh(force: true) }
             }
             .disabled(store.isRefreshing)
+            if !store.visible.isEmpty {
+                Menu("Open Website") {
+                    ForEach(store.visible) { id in
+                        Button(id.displayName) { NSWorkspace.shared.open(id.webURL) }
+                    }
+                }
+            }
             Button(settings.limitDisplay == .used ? "Show Remaining %" : "Show Used %") {
                 settings.limitDisplay = settings.limitDisplay == .used ? .remaining : .used
             }
