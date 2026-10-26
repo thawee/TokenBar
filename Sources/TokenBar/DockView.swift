@@ -71,6 +71,16 @@ extension ProviderID {
         case .antigravity: "chevron.up"
         }
     }
+
+    /// Opened when the tool's ring is clicked: its usage page where one exists.
+    var webURL: URL {
+        switch self {
+        case .claude: URL(string: "https://claude.ai/settings/usage")!
+        case .codex: URL(string: "https://chatgpt.com/codex/settings/usage")!
+        case .copilot: URL(string: "https://github.com/settings/copilot")!
+        case .antigravity: URL(string: "https://antigravity.google")!
+        }
+    }
 }
 
 extension LocalServerKind {
@@ -239,9 +249,13 @@ struct DockView: View {
                                   highlighted: state.hovered == .provider(id)) {
                             ProviderLogo(id: id, size: m.logo)
                         }
+                        .contentShape(Rectangle())
+                        .onTapGesture { NSWorkspace.shared.open(id.webURL) }
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(id.displayName)
                         .accessibilityValue(spokenLimit(providerState, shown: shown))
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction { NSWorkspace.shared.open(id.webURL) }
                     }
                 }
             }
