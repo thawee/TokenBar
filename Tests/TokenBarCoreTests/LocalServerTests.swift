@@ -37,6 +37,17 @@ private func fixture(_ name: String) throws -> Data {
     #expect(LocalServerParsing.identify(["python3", "-m", "http.server", "8000"]) == nil)
 }
 
+@Test func identifiesSplashPrivateInstallByEngineExecutable() throws {
+    let args = ["/Users/me/.local/bin/splash-private/1.4.1-copilot/python/bin/python3",
+                "-u", "-P", "-m", "server.server", "/Users/me/Library/Application Support/Splash/models/org/Repo",
+                "--model", "org/Repo", "--binary", "/Users/me/.local/bin/splash-private/1.4.1-copilot/engine/splash",
+                "--port=8000"]
+    let match = try #require(LocalServerParsing.identify(args))
+    #expect(match.kind == .splash)
+    #expect(match.port == 8000)
+    #expect(LocalServerParsing.identify(["python3", "-m", "server.server", "--binary", "/tmp/splash/engine/other"]) == nil)
+}
+
 @Test func parsesProcArgs() {
     var bytes: [UInt8] = withUnsafeBytes(of: Int32(3)) { Array($0) }
     bytes += Array("/bin/kapitsa".utf8)
@@ -122,4 +133,27 @@ func liveLocalServers() async {
               "memory=\(server.memoryUsed ?? 0)/\(server.memoryLimit ?? 0) (\(server.limitSource.map { "\($0)" } ?? "-"))",
               "context=\(server.contextLength ?? 0) slots=\(server.slots ?? 0) decode=\(server.decodeTokensPerSecond ?? 0)")
     }
+}
+
+@Test func identifiesLlamaServerAndRejectsCLI() throws {
+    let standard = try #require(LocalServerParsing.identify(["/opt/homebrew/bin/llama-server", "-m", "model.gguf"]))
+    #expect(standard.kind.rawValue == "llamaCpp")
+    #expect(standard.port == 9931)
+    #expect(LocalServerParsing.identify(["llama-server", "--port=8080"])?.port == 8080)
+    #expect(LocalServerParsing.identify(["llama-server", "--port", "9000"])?.port == 9000)
+    #expect(LocalServerParsing.identify(["llama-cli", "-m", "model.gguf"]) == nil)
+}
+
+@Test func llamaReadsPropertiesWithoutInventingMemoryLimit() throws {
+    let kind = try #require(LocalServerKind(rawValue: "llamaCpp"))
+    var server = LocalServer(kind: kind, port: 9931, status: .ready)
+    LocalServerParsing.llamaCpp(Data(#"{"model_path":"/models/Qwen.gguf","total_slots":4,"default_generation_settings":{"n_ctx":8192}}"#.utf8), into: &server)
+    #expect(server.status == .ready)
+    #expect(server.model == "Qwen.gguf")
+    #expect(server.contextLength == 8192)
+    #expect(server.slots == 4)
+    #expect(server.memoryLimit == nil)
+    #expect(server.memoryPercent == nil)
+    LocalServerParsing.llamaCpp(Data(#"{"error":{"code":503}}"#.utf8), into: &server)
+    #expect(server.status == .loading)
 }

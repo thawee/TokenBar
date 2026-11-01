@@ -4,9 +4,9 @@ import Metal
 import Observation
 
 /// Local inference servers. They have no plan limit; the dock shows how much of its
-/// memory limit each one holds.
+/// memory limit each one holds, where a limit is available.
 public enum LocalServerKind: String, CaseIterable, Sendable, Identifiable {
-    case kapitsa, splash
+    case kapitsa, splash, llamaCpp
 
     public var id: String { rawValue }
 
@@ -14,6 +14,7 @@ public enum LocalServerKind: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .kapitsa: "Kapitsa"
         case .splash: "Splash"
+        case .llamaCpp: "llama.cpp"
         }
     }
 }
@@ -46,7 +47,7 @@ public struct LocalServer: Sendable, Equatable, Identifiable {
     public var memoryUsed: UInt64?
     public var memoryLimit: UInt64?
     public var limitSource: LimitSource?
-    /// Kapitsa: context tokens per conversation and requests that run at once.
+    /// Kapitsa and llama.cpp: context tokens per conversation and concurrent slots.
     public var contextLength: Int?
     public var slots: Int?
     /// Splash: average speeds and totals since the server started.
@@ -84,9 +85,12 @@ enum LocalServerParsing {
     static let defaultPort = 8000
 
     /// Identifies a server from its argv: `kapitsa serve …`, or Splash's
-    /// `python3 -m server.server … --binary …/splash/… --port N` (what `splash serve` execs).
+    /// `python3 -m server.server … --binary …/engine/splash --port N` (what `splash serve` execs).
     static func identify(_ args: [String]) -> (kind: LocalServerKind, port: Int, budget: UInt64?)? {
         guard let executable = args.first else { return nil }
+        if URL(fileURLWithPath: executable).lastPathComponent == "llama-server" {
+            return (.llamaCpp, option("--port", in: args).flatMap(Int.init) ?? 9931, nil)
+        }
         let port = option("--port", in: args).flatMap { Int($0) } ?? defaultPort
         if URL(fileURLWithPath: executable).lastPathComponent == "kapitsa", args.dropFirst().first == "serve" {
             // GiB, as GPU memory is counted.
@@ -94,7 +98,7 @@ enum LocalServerParsing {
             return (.kapitsa, port, budget)
         }
         if let module = args.firstIndex(of: "-m"), args.indices.contains(module + 1), args[module + 1] == "server.server",
-           option("--binary", in: args)?.contains("/splash/") == true {
+           option("--binary", in: args).map({ URL(fileURLWithPath: $0).lastPathComponent == "splash" }) == true {
             return (.splash, port, nil)
         }
         return nil
@@ -142,6 +146,24 @@ enum LocalServerParsing {
         server.model = display.flatMap { $0.contains("/") ? nil : $0 } ?? active["id"] as? String
         server.contextLength = active["context_length"] as? Int
         server.slots = active["slots"] as? Int
+    }
+
+    /// llama-server's read-only `/props` endpoint (also available without --metrics).
+    static func llamaCpp(_ data: Data, into server: inout LocalServer) {
+        struct Properties: Decodable {
+            struct Settings: Decodable { let n_ctx: Int? }
+            let model_path: String?
+            let total_slots: Int?
+            let default_generation_settings: Settings?
+        }
+        guard let props = try? JSONDecoder().decode(Properties.self, from: data),
+              props.model_path != nil || props.total_slots != nil else {
+            server.status = .loading
+            return
+        }
+        server.model = props.model_path.map { URL(fileURLWithPath: $0).lastPathComponent }
+        server.contextLength = props.default_generation_settings?.n_ctx
+        server.slots = props.total_slots
     }
 
     /// Splash's `/status`; every field is optional.
@@ -196,7 +218,7 @@ extension LocalServerParsing {
 
 /// Finds server processes and asks each one for its state.
 enum LocalServerProbe {
-    /// Server processes, one per port. Only processes named `kapitsa` or `python…` have
+    /// Server processes, one per port. Only processes named `kapitsa`, `llama-server`, or `python…` have
     /// their arguments read.
     static func scan() -> [ServerProcess] {
         let count = proc_listallpids(nil, 0)
@@ -208,7 +230,7 @@ enum LocalServerProbe {
             var name = [CChar](repeating: 0, count: 64)
             guard proc_name(pid, &name, UInt32(name.count)) > 0 else { continue }
             let short = String(decoding: name.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-            guard short == "kapitsa" || short.lowercased().hasPrefix("python"),
+            guard short == "kapitsa" || short == "llama-server" || short.lowercased().hasPrefix("python"),
                   let args = arguments(pid), let match = LocalServerParsing.identify(args)
             else { continue }
             // A launcher and the server it starts share a port; keep the one holding the model.
@@ -235,7 +257,11 @@ enum LocalServerProbe {
 
     static func read(_ process: ServerProcess) async -> LocalServer {
         var server = LocalServer(kind: process.kind, port: process.port, status: .ready)
-        let path = process.kind == .kapitsa ? "v1/models" : "status"
+        let path = switch process.kind {
+        case .kapitsa: "v1/models"
+        case .splash: "status"
+        case .llamaCpp: "props"
+        }
         var request = URLRequest(url: URL(string: "http://127.0.0.1:\(process.port)/\(path)")!)
         // Polls run one at a time every 5 s, so a slow answer can be waited for.
         request.timeoutInterval = 3
@@ -244,11 +270,15 @@ enum LocalServerProbe {
             switch process.kind {
             case .kapitsa: LocalServerParsing.kapitsa(data, into: &server)
             case .splash: LocalServerParsing.splash(data, into: &server)
+            case .llamaCpp: LocalServerParsing.llamaCpp(data, into: &server)
             }
         } catch ProviderError.unauthorized {
             server.status = .locked
         } catch {
             server.status = .notAnswering
+        }
+        if process.kind == .llamaCpp {
+            server.memoryUsed = ProcessSampler.footprint(process.pid)
         }
         if process.kind == .kapitsa {
             server.memoryUsed = ProcessSampler.footprint(process.pid)

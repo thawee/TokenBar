@@ -131,7 +131,7 @@ The SMC is read through the `AppleSMC` user client (selector 2), which needs no 
 
 `LocalServerStore` polls every 5 s while the dock is visible and a server kind is turned on. Each poll:
 
-1. Scans processes (`LocalServerProbe.scan`): `proc_listallpids`, then `proc_name`, and reads argv (`KERN_PROCARGS2`) only for processes named `kapitsa` or `python…`. `LocalServerParsing.identify` takes `kapitsa serve` and Splash's `python3 -m server.server … --binary …/splash/…` (what `splash serve` execs into). `kapitsa claude` and other agent commands are not servers. Measured: 1.9 ms for the whole scan.
+1. Scans processes (`LocalServerProbe.scan`): `proc_listallpids`, then `proc_name`, and reads argv (`KERN_PROCARGS2`) only for processes named `kapitsa`, `llama-server`, or `python…`. `LocalServerParsing.identify` takes `kapitsa serve` and Splash's `python3 -m server.server … --binary …/engine/splash` (what `splash serve` execs into). The Splash engine executable name is matched independently of its installation directory, including `splash-private`. `kapitsa claude` and other agent commands are not servers. Measured: 1.9 ms for the whole scan.
 2. Keeps one process per port (the one with the larger footprint, so a launcher and the server it starts count once).
 3. Reads each server over plain HTTP on 127.0.0.1 with a 3 s timeout, one at a time. The bundle allows this with `NSAllowsLocalNetworking`.
 4. Merges with the last reading (`LocalServerParsing.merge`): a server that answered before and misses a poll keeps its fields, marked "not answering", since a server busy generating can be slow to answer. Kapitsa's memory is still fresh, from the process. A port that has never answered shows "Starting".
@@ -143,7 +143,9 @@ The SMC is read through the `AppleSMC` user client (selector 2), which needs no 
 | Card | model (the id when the name is a path), context, slots | model, average decode and prefill tokens/s, tokens in and out, requests, queue |
 | Never answered, or not ready | "Starting" | "Starting" (also when `ready` is false) |
 
-Kapitsa's footprint includes the weights: 16 GB for a 15 GB model, as `top` shows. The `/status` field paths for Splash come from its `metrics.py` (Splash 1.4.0); a live Splash server has not been read yet. Local rings ignore Used/Remaining, are red at 90%, and stay out of the menu bar and `mostUrgent`. `DockItem.local` is keyed by port, which survives a server restart. The rail lays out again only when `ports` changes, not on every poll.
+llama.cpp is discovered as `llama-server` (`--port`, default 9931). Its read-only `/props` endpoint supplies `model_path`, `default_generation_settings.n_ctx`, and `total_slots`. Process physical footprint supplies memory used; no memory limit is assumed, so the ring shows running status. Authentication and missed polls follow the same handling as the other local servers.
+
+Kapitsa's footprint includes the weights: 16 GB for a 15 GB model, as `top` shows. The `/status` field paths for Splash come from its `metrics.py` (Splash 1.4.0), also verified against a live Splash 1.4.1-copilot server using status schema 6. Local rings ignore Used/Remaining, are red at 90%, and stay out of the menu bar and `mostUrgent`. `DockItem.local` is keyed by port, which survives a server restart. The rail lays out again only when `ports` changes, not on every poll.
 
 ## 5. Side dock
 

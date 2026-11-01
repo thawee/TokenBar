@@ -88,6 +88,7 @@ extension LocalServerKind {
         switch self {
         case .kapitsa: Color(red: 0.82, green: 0.90, blue: 0.32)
         case .splash: Color(red: 0.62, green: 0.70, blue: 1.0)
+        case .llamaCpp: Color(red: 0.96, green: 0.72, blue: 0.40)
         }
     }
 
@@ -95,6 +96,7 @@ extension LocalServerKind {
         switch self {
         case .kapitsa: "atom"
         case .splash: "drop.fill"
+        case .llamaCpp: "server.rack"
         }
     }
 }
