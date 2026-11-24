@@ -144,3 +144,68 @@ private func reading(_ percent: Double, resetsAt: Date? = nil) -> LimitsReading 
     #expect(noReset.currentUsedPercent(now: now) == 50)
 }
 
+
+/// Holds its fetch until `release()`, to look at the store mid-flight.
+private final class GatedProvider: LimitsProvider, @unchecked Sendable {
+    let id: ProviderID = .claude
+    let minInterval: TimeInterval = 300
+    private let lock = NSLock()
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    var isWaiting: Bool { lock.withLock { waiter != nil } }
+
+    func fetch() async throws -> LimitsReading {
+        await withCheckedContinuation { continuation in lock.withLock { waiter = continuation } }
+        return reading(10)
+    }
+
+    func release() { lock.withLock { waiter }?.resume() }
+}
+
+@MainActor @Test func toolIsMarkedFetchingWhileItsFetchRuns() async {
+    let gated = GatedProvider()
+    let store = LimitsStore(providers: [gated])
+    let refresh = Task { await store.refresh() }
+    while !gated.isWaiting { await Task.yield() }
+    #expect(store.states[.claude]?.isFetching == true)
+    gated.release()
+    await refresh.value
+    #expect(store.states[.claude]?.isFetching == false)
+    #expect(store.states[.claude]?.reading?.windows.first?.usedPercent == 10)
+}
+
+private func temporaryCache() -> ReadingCache {
+    ReadingCache(url: FileManager.default.temporaryDirectory
+        .appending(path: "token-bar-tests-\(UUID().uuidString)/readings.json"))
+}
+
+@Test func readingCacheRoundTripsAndIgnoresUnreadableFiles() throws {
+    let cache = temporaryCache()
+    defer { try? FileManager.default.removeItem(at: cache.url.deletingLastPathComponent()) }
+    #expect(cache.load().isEmpty)
+
+    let saved = reading(42, resetsAt: Date(timeIntervalSince1970: 1_800_000_000))
+    cache.save([.codex: saved])
+    #expect(cache.load() == [.codex: saved])
+
+    try Data("not json".utf8).write(to: cache.url)
+    #expect(cache.load().isEmpty)
+}
+
+@MainActor @Test func cachedReadingsShowBeforeTheFirstFetchAndClearsAreSaved() async {
+    let cache = temporaryCache()
+    defer { try? FileManager.default.removeItem(at: cache.url.deletingLastPathComponent()) }
+    cache.save([.claude: reading(70), .codex: reading(20)])
+
+    let claude = FakeProvider(.claude, [.success(reading(75))])
+    let codex = FakeProvider(.codex, [.failure(.notConfigured("signed out"))])
+    let store = LimitsStore(providers: [claude, codex], cache: cache)
+    #expect(store.visible == [.claude, .codex])
+    #expect(store.states[.claude]?.reading?.windows.first?.usedPercent == 70)
+
+    await store.refresh()
+    #expect(store.visible == [.claude])
+    let stored = cache.load()
+    #expect(stored[.claude]?.windows.first?.usedPercent == 75)
+    #expect(stored[.codex] == nil)
+}

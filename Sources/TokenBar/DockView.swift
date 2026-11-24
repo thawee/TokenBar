@@ -89,6 +89,7 @@ extension LocalServerKind {
         case .kapitsa: Color(red: 0.82, green: 0.90, blue: 0.32)
         case .splash: Color(red: 0.62, green: 0.70, blue: 1.0)
         case .llamaCpp: Color(red: 0.96, green: 0.72, blue: 0.40)
+        case .omlx: Color(red: 0.40, green: 0.82, blue: 0.78)
         }
     }
 
@@ -97,6 +98,7 @@ extension LocalServerKind {
         case .kapitsa: "atom"
         case .splash: "drop.fill"
         case .llamaCpp: "server.rack"
+        case .omlx: "cpu"
         }
     }
 }
@@ -244,12 +246,14 @@ struct DockView: View {
                     let used = providerState?.reading?.headlineWindow?.currentUsedPercent()
                     let shown = settings.limitDisplay.value(used)
                     ring(.provider(id)) {
-                        RingGauge(m: m, tint: id.tint, value: shown,
-                                  fraction: (shown ?? 0) / 100,
-                                  label: percentText, alert: settings.limitDisplay.isAlert,
-                                  hasError: providerState?.error != nil,
-                                  highlighted: state.hovered == .provider(id)) {
-                            ProviderLogo(id: id, size: m.logo)
+                        Delayed(active: providerState?.isFetching == true) { busy in
+                            RingGauge(m: m, tint: id.tint, value: shown,
+                                      fraction: (shown ?? 0) / 100,
+                                      label: percentText, alert: settings.limitDisplay.isAlert,
+                                      hasError: providerState?.error != nil,
+                                      highlighted: state.hovered == .provider(id), busy: busy) {
+                                ProviderLogo(id: id, size: m.logo)
+                            }
                         }
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(id.displayName)
@@ -318,6 +322,12 @@ struct DockView: View {
                     }
                 }
             }
+            ForEach(local.servers.filter { $0.dashboardURL != nil }) { server in
+                if let url = server.dashboardURL {
+                    Button("Open oMLX Dashboard (\(server.port))") { NSWorkspace.shared.open(url) }
+                    Button("Set oMLX API Key (\(server.port))…") { setOMLXKey(port: server.port) }
+                }
+            }
             Button(settings.limitDisplay == .used ? "Show Remaining %" : "Show Used %") {
                 settings.limitDisplay = settings.limitDisplay == .used ? .remaining : .used
             }
@@ -327,6 +337,27 @@ struct DockView: View {
             }
             Divider()
             Button("Quit TokenBar") { NSApplication.shared.terminate(nil) }
+        }
+    }
+
+    private func setOMLXKey(port: Int) {
+        let alert = NSAlert()
+        alert.messageText = "oMLX API Key (port \(port))"
+        alert.informativeText = "Enter the main API key. It is saved in macOS Keychain. Leave empty to use oMLX's configuration."
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            try OMLXCredentials.save(field.stringValue, port: port)
+        } catch {
+            let failure = NSAlert()
+            failure.messageText = "Could not save oMLX API key"
+            failure.informativeText = error.localizedDescription
+            failure.runModal()
         }
     }
 
@@ -402,6 +433,7 @@ struct RingGauge<Center: View>: View {
     let alert: (Double) -> Bool
     var hasError = false
     var highlighted = false
+    var busy = false
     /// Off for system metrics: they change every 2 s, and animating each change keeps
     /// SwiftUI redrawing at display rate.
     var animated = true
@@ -427,6 +459,9 @@ struct RingGauge<Center: View>: View {
                     .stroke(isRingAlert ? alertRed : tint, style: StrokeStyle(lineWidth: m.line, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(animated && !reduceMotion ? .easeOut(duration: 0.6) : nil, value: fraction)
+                if busy {
+                    BusyArc(line: m.line)
+                }
                 if let inner {
                     let fill = inner.value.map { min(max($0 / 100, 0), 1) } ?? 0
                     ZStack {
@@ -458,6 +493,40 @@ struct RingGauge<Center: View>: View {
                 .font(.system(size: m.font, weight: .semibold).monospacedDigit())
                 .foregroundStyle(isAlert || (hasError && value == nil) ? alertRed : .white.opacity(0.9))
         }
+    }
+}
+
+/// A short arc circling the ring while its tool is being fetched; still under Reduce Motion.
+private struct BusyArc: View {
+    let line: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
+            let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2
+            Circle()
+                .trim(from: 0, to: 0.18)
+                .stroke(.white.opacity(0.5), style: StrokeStyle(lineWidth: line, lineCap: .round))
+                .rotationEffect(.degrees(reduceMotion ? -90 : turn * 360 - 90))
+        }
+    }
+}
+
+/// Passes `active` to `content` only once it has stayed on for a moment, so fetches that
+/// finish almost at once (Codex reads a local file) do not make the indicator blink.
+struct Delayed<Content: View>: View {
+    let active: Bool
+    @ViewBuilder let content: (Bool) -> Content
+    @State private var settled = false
+
+    var body: some View {
+        content(active && settled)
+            .task(id: active) {
+                settled = false
+                guard active else { return }
+                try? await Task.sleep(for: .milliseconds(400))
+                settled = !Task.isCancelled
+            }
     }
 }
 
@@ -522,6 +591,12 @@ private struct LimitCardContent: View {
     let display: LimitDisplay
 
     var body: some View {
+        Delayed(active: state?.isFetching == true) { busy in
+            card(busy: busy)
+        }
+    }
+
+    private func card(busy: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 ProviderLogo(id: id, size: 16)
@@ -555,8 +630,9 @@ private struct LimitCardContent: View {
             if let error = state?.error {
                 Text(error.message).font(.system(size: 10)).foregroundStyle(alertRed.opacity(0.9))
             }
+            // Swapped on the same line: the card is sized from store changes, not this delay.
             if let observed = state?.reading?.observedAt {
-                Text("Updated \(observed, format: .relative(presentation: .named))")
+                Text(busy ? "Updating..." : "Updated \(observed, format: .relative(presentation: .named))")
                     .font(.system(size: 10)).foregroundStyle(.white.opacity(0.55))
             }
         }
@@ -648,14 +724,14 @@ private struct LocalCardContent: View {
         switch server.status {
         case .loading: lines.append("Starting: the server does not answer yet")
         case .notAnswering: lines.append("Not answering (busy?): last reading shown")
-        case .locked: lines.append("API key set, so model details are hidden")
+        case .locked: lines.append("Authentication required: check the server's API key")
         case .ready: break
         }
         if let model = server.model { lines.append(model) }
         if let used = server.memoryUsed {
             let limit = server.memoryLimit.map { " of \(gb($0))" } ?? ""
             let source = switch server.limitSource {
-            case .budget?: " (--mem-budget)"
+            case .budget?: server.kind == .llamaCpp ? " (--memory-budget; estimated buffers)" : " (--mem-budget)"
             case .gpuDefault?: " (macOS GPU limit)"
             case .server?: " (\(server.kind.displayName) limit)"
             case nil: ""

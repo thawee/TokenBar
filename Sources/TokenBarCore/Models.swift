@@ -19,11 +19,11 @@ public enum ProviderID: String, CaseIterable, Sendable, Identifiable {
     }
 }
 
-public enum WindowKind: Sendable, Equatable {
+public enum WindowKind: String, Sendable, Equatable, Codable {
     case session, weekly, monthly, other
 }
 
-public struct LimitWindow: Sendable, Equatable {
+public struct LimitWindow: Sendable, Equatable, Codable {
     public let label: String
     public let kind: WindowKind
     /// 0...100, nil when the provider reports the window without a value.
@@ -45,7 +45,7 @@ public struct LimitWindow: Sendable, Equatable {
     }
 }
 
-public struct LimitsReading: Sendable, Equatable {
+public struct LimitsReading: Sendable, Equatable, Codable {
     public let plan: String?
     public let windows: [LimitWindow]
     /// When the data was observed (file mtime for local sources, fetch time for network ones).

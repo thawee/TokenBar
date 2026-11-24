@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.0 (2026-11-24)
+
+- Add oMLX monitoring: discover CLI and bundled servers by process and listening socket, show loaded models, memory limits, speed, token/request totals, and queue. Add dashboard and main API key actions; overrides are stored in macOS Keychain.
+- Cache AI plan readings across launches and show progress for each tool while it refreshes. Refresh local servers concurrently so a slow server does not delay the others.
+- Support llama.cpp model aliases and configured memory budgets; recognize Splash private installs.
+
 - Fix Codex showing `--` after the 5-hour limit is hit: Codex then logs a final `limit_id: "premium"` event with no windows, which hid the last real reading. Events without a window are now skipped.
 - Local model servers: a LOCAL section in the dock shows Kapitsa and Splash while they run, one ring each for the memory the server holds out of its limit. Kapitsa: the server process's footprint against `--mem-budget` (or the GPU memory macOS allows, its default), plus model, context and slots from `/v1/models`. Splash: memory, average read and write speed, tokens, requests and queue from `/status`. Found by process every 5 s while the dock is visible; turn either off under Customize > Local models.
 - Add a Storage ring (sky blue) and card for the boot disk: used of total, and available as Finder reports it (purgeable space counts as free). Read every 30 s. It is turned on for existing installs too: settings now remember which metrics they have seen, so later metrics start on.

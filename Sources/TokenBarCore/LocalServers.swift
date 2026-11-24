@@ -6,7 +6,7 @@ import Observation
 /// Local inference servers. They have no plan limit; the dock shows how much of its
 /// memory limit each one holds, where a limit is available.
 public enum LocalServerKind: String, CaseIterable, Sendable, Identifiable {
-    case kapitsa, splash, llamaCpp
+    case kapitsa, splash, llamaCpp, omlx
 
     public var id: String { rawValue }
 
@@ -15,6 +15,7 @@ public enum LocalServerKind: String, CaseIterable, Sendable, Identifiable {
         case .kapitsa: "Kapitsa"
         case .splash: "Splash"
         case .llamaCpp: "llama.cpp"
+        case .omlx: "oMLX"
         }
     }
 }
@@ -32,7 +33,7 @@ public struct LocalServer: Sendable, Equatable, Identifiable {
 
     /// Where `memoryLimit` comes from.
     public enum LimitSource: Sendable, Equatable {
-        /// Kapitsa's --mem-budget.
+        /// An explicit command-line memory budget.
         case budget
         /// What macOS recommends for the GPU, Kapitsa's default budget (it keeps a little less).
         case gpuDefault
@@ -60,6 +61,11 @@ public struct LocalServer: Sendable, Equatable, Identifiable {
 
     public var id: Int { port }
 
+    public var dashboardURL: URL? {
+        guard kind == .omlx else { return nil }
+        return URL(string: "http://127.0.0.1:\(port)/admin")
+    }
+
     public init(kind: LocalServerKind, port: Int, status: Status) {
         self.kind = kind
         self.port = port
@@ -77,8 +83,10 @@ struct ServerProcess: Equatable {
     let kind: LocalServerKind
     let pid: pid_t
     let port: Int
-    /// Kapitsa's --mem-budget, in bytes.
+    /// The configured memory budget, in bytes.
     let budget: UInt64?
+    var alias: String? = nil
+    var apiKey: String? = nil
 }
 
 enum LocalServerParsing {
@@ -86,20 +94,49 @@ enum LocalServerParsing {
 
     /// Identifies a server from its argv: `kapitsa serve …`, or Splash's
     /// `python3 -m server.server … --binary …/engine/splash --port N` (what `splash serve` execs).
-    static func identify(_ args: [String]) -> (kind: LocalServerKind, port: Int, budget: UInt64?)? {
+    static func identify(_ args: [String]) -> (kind: LocalServerKind, port: Int, budget: UInt64?, alias: String?)? {
         guard let executable = args.first else { return nil }
+        let name = URL(fileURLWithPath: executable).lastPathComponent
+        let omlxArguments: ArraySlice<String>?
+        if name == "omlx-server" {
+            omlxArguments = args.dropFirst()
+        } else if name == "omlx" {
+            omlxArguments = args.dropFirst()
+        } else if name.lowercased().hasPrefix("python"), args.count > 1 {
+            let pythonArgs = args.dropFirst().drop { ["-u", "-P", "-s", "-E", "-I", "-B", "-S"].contains($0) }
+            if pythonArgs.first == "-m", let module = pythonArgs.dropFirst().first, ["omlx", "omlx.cli"].contains(module) {
+                omlxArguments = pythonArgs.dropFirst(2)
+            } else if let script = pythonArgs.first, URL(fileURLWithPath: script).lastPathComponent == "omlx" {
+                omlxArguments = pythonArgs.dropFirst()
+            } else {
+                omlxArguments = nil
+            }
+        } else {
+            omlxArguments = nil
+        }
+        if let command = omlxArguments, name == "omlx-server" || command.first == "serve" {
+            let port = option("--port", in: args).flatMap(Int.init) ?? defaultPort
+            guard (1...65535).contains(port) else { return nil }
+            return (.omlx, port, nil, nil)
+        }
         if URL(fileURLWithPath: executable).lastPathComponent == "llama-server" {
-            return (.llamaCpp, option("--port", in: args).flatMap(Int.init) ?? 9931, nil)
+            let mib = option("--memory-budget", in: args).flatMap(UInt64.init)
+            let budget = mib.flatMap { value -> UInt64? in
+                let (bytes, overflow) = value.multipliedReportingOverflow(by: 1_048_576)
+                return overflow || bytes == 0 ? nil : bytes
+            }
+            let alias = option("--alias", in: args) ?? option("-a", in: args)
+            return (.llamaCpp, option("--port", in: args).flatMap(Int.init) ?? 9931, budget, alias)
         }
         let port = option("--port", in: args).flatMap { Int($0) } ?? defaultPort
         if URL(fileURLWithPath: executable).lastPathComponent == "kapitsa", args.dropFirst().first == "serve" {
             // GiB, as GPU memory is counted.
             let budget = option("--mem-budget", in: args).flatMap(Double.init).map { UInt64($0 * 1_073_741_824) }
-            return (.kapitsa, port, budget)
+            return (.kapitsa, port, budget, nil)
         }
         if let module = args.firstIndex(of: "-m"), args.indices.contains(module + 1), args[module + 1] == "server.server",
            option("--binary", in: args).map({ URL(fileURLWithPath: $0).lastPathComponent == "splash" }) == true {
-            return (.splash, port, nil)
+            return (.splash, port, nil, nil)
         }
         return nil
     }
@@ -130,6 +167,25 @@ enum LocalServerParsing {
             index = end + 1
         }
         return args.count == argc ? args : nil
+    }
+
+    static func omlxEnvironment(_ data: Data) -> [String: String] {
+        guard let args = procArgs(data) else { return [:] }
+        var index = data.startIndex + 4
+        while index < data.endIndex, data[index] != 0 { index += 1 }
+        while index < data.endIndex, data[index] == 0 { index += 1 }
+        for _ in args {
+            while index < data.endIndex, data[index] != 0 { index += 1 }
+            if index < data.endIndex { index += 1 }
+        }
+        var result: [String: String] = [:]
+        for entry in data[index...].split(separator: 0) {
+            let pair = String(decoding: entry, as: UTF8.self).split(separator: "=", maxSplits: 1)
+            if pair.count == 2, ["OMLX_PORT", "OMLX_API_KEY", "OMLX_BASE_PATH"].contains(String(pair[0])) {
+                result[String(pair[0])] = String(pair[1])
+            }
+        }
+        return result
     }
 
     /// Kapitsa's `/v1/models`: the active model. A model loaded from a directory is named
@@ -218,7 +274,7 @@ extension LocalServerParsing {
 
 /// Finds server processes and asks each one for its state.
 enum LocalServerProbe {
-    /// Server processes, one per port. Only processes named `kapitsa`, `llama-server`, or `python…` have
+    /// Server processes, one per port. Only known server executables and `python…` have
     /// their arguments read.
     static func scan() -> [ServerProcess] {
         let count = proc_listallpids(nil, 0)
@@ -230,24 +286,53 @@ enum LocalServerProbe {
             var name = [CChar](repeating: 0, count: 64)
             guard proc_name(pid, &name, UInt32(name.count)) > 0 else { continue }
             let short = String(decoding: name.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-            guard short == "kapitsa" || short == "llama-server" || short.lowercased().hasPrefix("python"),
-                  let args = arguments(pid), let match = LocalServerParsing.identify(args)
+            guard short == "kapitsa" || short == "llama-server" || short == "omlx" || short == "omlx-server"
+                    || short.lowercased().hasPrefix("python"),
+                  let data = processArguments(pid), let args = LocalServerParsing.procArgs(data),
+                  let match = LocalServerParsing.identify(args)
             else { continue }
+            let configuration = match.kind == .omlx
+                ? OMLXConfiguration.load(args: args, environment: LocalServerParsing.omlxEnvironment(data)) : nil
+            let port = configuration.map { listeningPorts(pid).first ?? $0.port } ?? match.port
             // A launcher and the server it starts share a port; keep the one holding the model.
             let footprint = ProcessSampler.footprint(pid) ?? 0
-            if let existing = byPort[match.port], existing.footprint >= footprint { continue }
-            byPort[match.port] = (ServerProcess(kind: match.kind, pid: pid, port: match.port, budget: match.budget), footprint)
+            if let existing = byPort[port], existing.footprint >= footprint { continue }
+            byPort[port] = (ServerProcess(kind: match.kind, pid: pid, port: port, budget: match.budget,
+                                         alias: match.alias, apiKey: configuration?.apiKey), footprint)
         }
         return byPort.values.map(\.process).sorted { ($0.kind.rawValue, $0.port) < ($1.kind.rawValue, $1.port) }
     }
 
     static func arguments(_ pid: pid_t) -> [String]? {
+        processArguments(pid).flatMap(LocalServerParsing.procArgs)
+    }
+
+    private static func processArguments(_ pid: pid_t) -> Data? {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
         var size = 0
         guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return nil }
         var buffer = [UInt8](repeating: 0, count: size)
         guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return nil }
-        return LocalServerParsing.procArgs(Data(buffer.prefix(size)))
+        return Data(buffer.prefix(size))
+    }
+
+    /// Bundled oMLX servers may have no flags; ask the kernel for their listening port.
+    static func listeningPorts(_ pid: pid_t) -> [Int] {
+        let size = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
+        guard size > 0 else { return [] }
+        var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(size) / MemoryLayout<proc_fdinfo>.stride + 8)
+        let bytes = fds.withUnsafeMutableBytes {
+            proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count))
+        }
+        return Array(Set(fds.prefix(Int(max(bytes, 0)) / MemoryLayout<proc_fdinfo>.stride).compactMap { fd -> Int? in
+            guard fd.proc_fdtype == PROX_FDTYPE_SOCKET else { return nil }
+            var info = socket_fdinfo()
+            let count = proc_pidfdinfo(pid, fd.proc_fd, PROC_PIDFDSOCKETINFO, &info, Int32(MemoryLayout<socket_fdinfo>.size))
+            guard count == MemoryLayout<socket_fdinfo>.size, info.psi.soi_kind == SOCKINFO_TCP else { return nil }
+            let tcp = info.psi.soi_proto.pri_tcp
+            guard tcp.tcpsi_state == TSI_S_LISTEN else { return nil }
+            return Int(UInt16(bigEndian: UInt16(truncatingIfNeeded: tcp.tcpsi_ini.insi_lport)))
+        })).sorted()
     }
 
     /// Kapitsa's default budget. Asking Metal costs about 2 MB and 60 ms, so it is asked
@@ -255,30 +340,62 @@ enum LocalServerProbe {
     /// without --mem-budget.
     private static let gpuLimit: UInt64? = MTLCreateSystemDefaultDevice()?.recommendedMaxWorkingSetSize
 
-    static func read(_ process: ServerProcess) async -> LocalServer {
+    /// Reads every server at once, so one that hangs costs its timeout once, not per server.
+    /// Results keep the order of `processes`.
+    static func readAll(
+        _ processes: [ServerProcess],
+        read: @escaping @Sendable (ServerProcess) async -> LocalServer = { await LocalServerProbe.read($0) }
+    ) async -> [LocalServer] {
+        await withTaskGroup(of: (Int, LocalServer).self) { group in
+            for (index, process) in processes.enumerated() {
+                group.addTask { (index, await read(process)) }
+            }
+            var results: [(Int, LocalServer)] = []
+            for await result in group { results.append(result) }
+            return results.sorted { $0.0 < $1.0 }.map(\.1)
+        }
+    }
+
+    static func read(
+        _ process: ServerProcess,
+        send: @Sendable (URLRequest) async throws -> Data = { try await HTTP.send($0) }
+    ) async -> LocalServer {
         var server = LocalServer(kind: process.kind, port: process.port, status: .ready)
         let path = switch process.kind {
         case .kapitsa: "v1/models"
         case .splash: "status"
         case .llamaCpp: "props"
+        case .omlx: "admin/api/stats"
         }
         var request = URLRequest(url: URL(string: "http://127.0.0.1:\(process.port)/\(path)")!)
         // Polls run one at a time every 5 s, so a slow answer can be waited for.
         request.timeoutInterval = 3
+        if process.kind == .omlx, let key = OMLXCredentials.key(port: process.port) ?? process.apiKey {
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
         do {
-            let data = try await HTTP.send(request)
+            let data = try await send(request)
             switch process.kind {
             case .kapitsa: LocalServerParsing.kapitsa(data, into: &server)
             case .splash: LocalServerParsing.splash(data, into: &server)
             case .llamaCpp: LocalServerParsing.llamaCpp(data, into: &server)
+            case .omlx: LocalServerParsing.omlx(data, into: &server)
             }
         } catch ProviderError.unauthorized {
             server.status = .locked
         } catch {
             server.status = .notAnswering
         }
-        if process.kind == .llamaCpp {
+        if process.kind == .omlx, server.memoryUsed == nil {
             server.memoryUsed = ProcessSampler.footprint(process.pid)
+        }
+        if process.kind == .llamaCpp {
+            if let alias = process.alias { server.model = alias }
+            server.memoryUsed = ProcessSampler.footprint(process.pid)
+            if let budget = process.budget {
+                server.memoryLimit = budget
+                server.limitSource = .budget
+            }
         }
         if process.kind == .kapitsa {
             server.memoryUsed = ProcessSampler.footprint(process.pid)
@@ -329,11 +446,8 @@ public final class LocalServerStore {
                     while true {
                         let processes = await Task.detached(priority: .utility) { LocalServerProbe.scan() }.value
                         let wanted = self?.enabled ?? []
-                        var found: [LocalServer] = []
-                        for process in processes where wanted.contains(process.kind) {
-                            let fresh = await LocalServerProbe.read(process)
-                            found.append(LocalServerParsing.merge(fresh, previous: previous[process.port]))
-                        }
+                        let fresh = await LocalServerProbe.readAll(processes.filter { wanted.contains($0.kind) })
+                        let found = fresh.map { LocalServerParsing.merge($0, previous: previous[$0.port]) }
                         previous = Dictionary(found.map { ($0.port, $0) }, uniquingKeysWith: { a, _ in a })
                         try Task.checkCancellation()
                         self?.publish(found)

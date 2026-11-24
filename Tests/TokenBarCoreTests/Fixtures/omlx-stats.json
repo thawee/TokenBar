@@ -1,0 +1,13 @@
+{
+  "total_prompt_tokens": 182340,
+  "total_completion_tokens": 20511,
+  "total_requests": 57,
+  "avg_prefill_tps": 612.4,
+  "avg_generation_tps": 38.7,
+  "active_models": {
+    "model_memory_used": 18253611008,
+    "model_memory_max": 25769803776,
+    "total_waiting_requests": 2,
+    "models": [{"id": "Qwen3.5-27B"}, {"id": "embedding-model"}]
+  }
+}

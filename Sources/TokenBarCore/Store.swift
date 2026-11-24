@@ -6,6 +6,8 @@ public struct ProviderState: Sendable, Equatable {
     public var reading: LimitsReading?
     public var error: ProviderError?
     public var lastAttempt: Date?
+    /// A fetch for this tool is in flight.
+    public var isFetching = false
 }
 
 @MainActor
@@ -16,6 +18,7 @@ public final class LimitsStore {
     /// A refresh was asked for while one was running; run it once that one finishes.
     @ObservationIgnored private var refreshPending = false
     private let providers: [any LimitsProvider]
+    private let cache: ReadingCache?
     private var loop: Task<Void, Never>?
 
     /// Tools the user wants. Disabled ones are never fetched (no Keychain read, no
@@ -30,8 +33,16 @@ public final class LimitsStore {
 
     public init(providers: [any LimitsProvider] = [
         ClaudeProvider(), CodexProvider(), CopilotProvider(), AntigravityProvider(),
-    ]) {
+    ], cache: ReadingCache? = nil) {
         self.providers = providers
+        self.cache = cache
+        for (id, reading) in cache?.load() ?? [:] {
+            states[id] = ProviderState(reading: reading)
+        }
+    }
+
+    private var readings: [ProviderID: LimitsReading] {
+        states.compactMapValues(\.reading)
     }
 
     /// Providers worth showing: anything with data, or an error other than "not set up".
@@ -97,14 +108,19 @@ public final class LimitsStore {
         }
         guard !due.isEmpty else { return }
         isRefreshing = true
+        let before = readings
         defer {
+            if let cache, readings != before { cache.save(readings) }
             isRefreshing = false
             if refreshPending {
                 refreshPending = false
                 Task { await refresh() }
             }
         }
-        for provider in due { states[provider.id, default: ProviderState()].lastAttempt = now }
+        for provider in due {
+            states[provider.id, default: ProviderState()].lastAttempt = now
+            states[provider.id]?.isFetching = true
+        }
 
         await withTaskGroup(of: (ProviderID, Result<LimitsReading, ProviderError>).self) { group in
             for provider in due {
@@ -117,6 +133,7 @@ public final class LimitsStore {
             for await (id, result) in group {
                 // Turned off while the fetch was in flight.
                 guard enabled.contains(id) else { continue }
+                states[id]?.isFetching = false
                 switch result {
                 case .success(let reading):
                     states[id]?.reading = reading

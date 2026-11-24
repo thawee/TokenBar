@@ -10,7 +10,7 @@ struct TokenBarApp: App {
     @AppStorage("dock.visible") private var dockVisible = true
 
     init() {
-        let store = LimitsStore()
+        let store = LimitsStore(cache: .standard)
         let settings = DockSettings()
         store.enabled = settings.tools
         _store = State(initialValue: store)
@@ -108,6 +108,12 @@ struct ProviderSection: View {
     let display: LimitDisplay
 
     var body: some View {
+        Delayed(active: state.isFetching) { busy in
+            section(busy: busy)
+        }
+    }
+
+    private func section(busy: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(id.displayName).font(.headline)
@@ -115,7 +121,9 @@ struct ProviderSection: View {
                     Text(plan.capitalized).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if let observed = state.reading?.observedAt {
+                if busy {
+                    ProgressView().controlSize(.mini)
+                } else if let observed = state.reading?.observedAt {
                     Text(observed, format: .relative(presentation: .numeric))
                         .font(.caption2).foregroundStyle(.tertiary)
                 }

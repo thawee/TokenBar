@@ -4,7 +4,7 @@ A lightweight native macOS menu bar app and side dock that shows how much of you
 
 - **AI plan limits** for Antigravity, Claude Code, Codex, and GitHub Copilot: 5-hour, weekly, and monthly windows with reset times.
 - **System load** for running local models: CPU, GPU, memory, boot disk storage and CPU/GPU die temperature.
-- **Local model servers** ([llama.cpp](https://github.com/ggml-org/llama.cpp), [Kapitsa](https://github.com/nace-ai/kapitsa), [Splash](https://github.com/incoai/splash)): memory use (and its limit where available), the model, and speed and token counts where the server reports them.
+- **Local model servers** ([llama.cpp](https://github.com/ggml-org/llama.cpp), [Kapitsa](https://github.com/nace-ai/kapitsa), [Splash](https://github.com/incoai/splash), [oMLX](https://github.com/jundot/omlx)): memory use (and its limit where available), the model, and speed and token counts where the server reports them.
 - **Native and small**: SwiftUI + AppKit, no dependencies, about 1 MB on disk (236 KB of it the app icon), 23 to 47 MB of memory and about 0.5% CPU while sampling.
 
 It was built as a lightweight alternative to [Token Monitor](https://github.com/Javis603/token-monitor), covering only plan limits and system load.
@@ -32,7 +32,7 @@ It was built as a lightweight alternative to [Token Monitor](https://github.com/
 | AI limits | Used / Remaining. Applies to the dock, cards, popover and menu bar. Red at 90% used or 10% left. |
 | Menu bar | Most urgent tool / a specific tool / Icon only, number from 70% |
 | AI tools | Antigravity, Claude Code, Codex, GitHub Copilot, shown A–Z in the dock, popover, menu bar picker, and settings. A tool you turn off is never checked: no Keychain read, no network call. |
-| Local models | Kapitsa, Splash, llama.cpp. Shown only while the server runs; red at 90% of its memory limit. |
+| Local models | Kapitsa, Splash, llama.cpp, oMLX. Shown only while the server runs; red at 90% of its memory limit. |
 | System | CPU, GPU, Memory, Storage, Temperature. Storage is red at 90% full. Optionally combine CPU and GPU in one ring: CPU outside, GPU inside, the number is the busier of the two, and the card shows both. |
 
 ## Data sources
@@ -57,10 +57,12 @@ System metrics are sampled only while the dock is visible and at least one metri
 | Local server | Found by | Read from | Interval |
 |---|---|---|---|
 | Kapitsa | a `kapitsa serve` process; port from `--port` (default 8000) | memory: the process's physical footprint, against `--mem-budget` or, without it, the GPU memory macOS recommends (Kapitsa's default keeps a little under it). Model, context and slots: `GET 127.0.0.1:<port>/v1/models` | 5 s |
-| llama.cpp | `llama-server`; port from `--port` (default 9931) | `GET 127.0.0.1:<port>/props`: model, context and slots; process memory (no server memory limit) | 5 s |
+| llama.cpp | `llama-server`; port from `--port` (default 9931) | `GET 127.0.0.1:<port>/props`: model, context and slots; process memory; `--alias` for model name, `--memory-budget` in MiB for estimated buffer budget | 5 s |
 | Splash | the `python3 -m server.server … --binary …/engine/splash` process that `splash serve` starts (including `splash-private` installs); port from `--port` | `GET 127.0.0.1:<port>/status`: memory and its limit, average speeds, token and request totals, queue | 5 s |
 
-Local servers are looked for only while the dock is visible, and only on 127.0.0.1. A server started with an API key answers 401, and the card says so.
+| oMLX | `omlx serve`, Python launchers, or `omlx-server`; listening socket supplies the port, with CLI/environment/saved settings as fallback (default 8000) | `GET 127.0.0.1:<port>/admin/api/stats`: loaded models, model memory and its limit, average speeds, token/request totals and queue; process memory if stats are unavailable | 5 s |
+
+Local servers are looked for only while the dock is visible, and only on 127.0.0.1. A server that rejects authentication shows an authentication-required message. For oMLX, right-click the dock and choose **Set oMLX API Key** to save the main key in macOS Keychain; an empty value removes that override. Otherwise TokenBar uses the key from oMLX’s arguments, environment, or saved settings. Subkeys cannot access admin stats. **Open oMLX Dashboard** opens `http://127.0.0.1:<port>/admin`; the web UI must be enabled (headless servers do not serve the dashboard).
 
 The CPU and Memory cards also list the **top 5 processes**, scanned every 2 s only while that card is open:
 
@@ -107,6 +109,7 @@ Sources/
     Parsers.swift      response parsers for the four tools
     Providers.swift    credential reads and fetches per tool
     Store.swift        LimitsStore: polling, intervals, enabled tools
+    ReadingCache.swift last readings on disk, shown at launch
     System.swift       SystemSampler (CPU, GPU, memory, storage, temperature), SystemStore
     Processes.swift    top processes by CPU (ps) and memory (footprint)
     SMC.swift          AppleSMC reader and die-temperature selection

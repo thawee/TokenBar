@@ -44,7 +44,7 @@ All UI state is `@Observable` and `@MainActor`:
 
 | Object | Owns |
 |---|---|
-| `LimitsStore` | per-provider `ProviderState` (last reading, last error, last attempt), the `enabled` set |
+| `LimitsStore` | per-provider `ProviderState` (last reading, last error, last attempt, fetch in flight), the `enabled` set |
 | `SystemStore` | latest `SystemSnapshot`, plus `availableMetrics`, which is assigned only when it changes |
 | `DockSettings` | size, enabled tools, enabled metrics, used/remaining. Persisted on every change. |
 | `DockState` | dock side, hovered item, ring frames (frames are `@ObservationIgnored`) |
@@ -78,6 +78,8 @@ Response fields, as verified against live data:
 - After a `failed` or `unauthorized` error, a provider retries after 60 s instead of waiting a full interval.
 - A failed fetch keeps the last good reading, so the UI shows stale numbers, not nothing. `notConfigured` clears the reading.
 - Only one refresh runs at a time. A request that arrives during a refresh runs once that refresh finishes.
+- Providers in one refresh are fetched concurrently; each result is applied as it arrives. `isFetching` is set per provider while its fetch runs. Views show it (a spinning arc on the ring, a spinner in the popover, "Updating..." in the hover card) only after it has been on for 400 ms, so fast local reads do not blink.
+- The last reading per tool is saved to `~/Library/Application Support/TokenBar/readings.json` (`ReadingCache`) whenever readings change, including when one is cleared. At launch these show at once with their original "Updated" time, and the first refresh replaces them. An unreadable file is ignored.
 - Disabled tools are filtered before fetching, their state is cleared, and a result that arrives for a tool just turned off is dropped. Re-enabling a tool fetches it right away.
 
 ### Display
@@ -133,7 +135,7 @@ The SMC is read through the `AppleSMC` user client (selector 2), which needs no 
 
 1. Scans processes (`LocalServerProbe.scan`): `proc_listallpids`, then `proc_name`, and reads argv (`KERN_PROCARGS2`) only for processes named `kapitsa`, `llama-server`, or `python…`. `LocalServerParsing.identify` takes `kapitsa serve` and Splash's `python3 -m server.server … --binary …/engine/splash` (what `splash serve` execs into). The Splash engine executable name is matched independently of its installation directory, including `splash-private`. `kapitsa claude` and other agent commands are not servers. Measured: 1.9 ms for the whole scan.
 2. Keeps one process per port (the one with the larger footprint, so a launcher and the server it starts count once).
-3. Reads each server over plain HTTP on 127.0.0.1 with a 3 s timeout, one at a time. The bundle allows this with `NSAllowsLocalNetworking`.
+3. Reads all servers concurrently (`LocalServerProbe.readAll`) over plain HTTP on 127.0.0.1 with a 3 s timeout, so a hung server costs one timeout per poll, not one per server. The bundle allows this with `NSAllowsLocalNetworking`.
 4. Merges with the last reading (`LocalServerParsing.merge`): a server that answered before and misses a poll keeps its fields, marked "not answering", since a server busy generating can be slow to answer. Kapitsa's memory is still fresh, from the process. A port that has never answered shows "Starting".
 
 | | Kapitsa | Splash |
@@ -143,7 +145,7 @@ The SMC is read through the `AppleSMC` user client (selector 2), which needs no 
 | Card | model (the id when the name is a path), context, slots | model, average decode and prefill tokens/s, tokens in and out, requests, queue |
 | Never answered, or not ready | "Starting" | "Starting" (also when `ready` is false) |
 
-llama.cpp is discovered as `llama-server` (`--port`, default 9931). Its read-only `/props` endpoint supplies `model_path`, `default_generation_settings.n_ctx`, and `total_slots`. Process physical footprint supplies memory used; no memory limit is assumed, so the ring shows running status. Authentication and missed polls follow the same handling as the other local servers.
+llama.cpp is discovered as `llama-server` (`--port`, default 9931). Its read-only `/props` endpoint supplies `model_path`, `default_generation_settings.n_ctx`, and `total_slots`. Process physical footprint supplies memory used. `--alias` overrides the model filename; `--memory-budget` (MiB, zero disables) supplies the estimated buffer budget, which is not an RSS cap. Without a budget the ring shows running status. Authentication and missed polls follow the same handling as the other local servers.
 
 Kapitsa's footprint includes the weights: 16 GB for a 15 GB model, as `top` shows. The `/status` field paths for Splash come from its `metrics.py` (Splash 1.4.0), also verified against a live Splash 1.4.1-copilot server using status schema 6. Local rings ignore Used/Remaining, are red at 90%, and stay out of the menu bar and `mostUrgent`. `DockItem.local` is keyed by port, which survives a server restart. The rail lays out again only when `ports` changes, not on every poll.
 
@@ -215,7 +217,7 @@ The first minute after launch costs more (about 1 s of CPU), for the initial fet
 
 ## 9. Testing
 
-- **Unit tests** (`swift test`, 39): the parsers for all four tools (including Antigravity CLI `/quota` JSON) against fixtures, Codex and window reset expiry handling, ISO dates with microseconds, store intervals, retry after failure, the force floor, enabled tools, display order, headline staleness, CPU tick math, the memory formula, storage clamping, SMC struct layout and decoders, sampler stop, and local servers (argv matching with both `--port 8001` and `--port=8001`, KERN_PROCARGS2 parsing, Kapitsa `/v1/models` and Splash `/status` fixtures, missing fields, keeping the last reading after a missed poll).
+- **Unit tests** (`swift test`, 48): the parsers for all four tools (including Antigravity CLI `/quota` JSON) against fixtures, Codex and window reset expiry handling, ISO dates with microseconds, store intervals, retry after failure, the force floor, enabled tools, display order, headline staleness, CPU tick math, the memory formula, storage clamping, SMC struct layout and decoders, sampler stop, and local servers (argv matching with both `--port 8001` and `--port=8001`, KERN_PROCARGS2 parsing, Kapitsa `/v1/models` and Splash `/status` fixtures, missing fields, keeping the last reading after a missed poll, reading all servers concurrently in order), the reading cache (round trip, unreadable file, cached readings at launch, a cleared reading is saved), and `isFetching` during a fetch.
 - **Live tests** (`LIVE=1`): call the real providers, sampler and local servers on this machine, printing values, never tokens.
 - **Visual checks:** the dock and cards were rendered off-screen with `ImageRenderer` (both sizes, both sides, used and remaining).
 
