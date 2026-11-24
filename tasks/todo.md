@@ -28,7 +28,7 @@ Verification: all 44 tests pass; swift build succeeds; live probe reads qwen3.8-
 - [x] Read local servers concurrently, keeping their order, through a testable readAll helper.
 - [x] Add tests (cache round trip, cached readings at launch, isFetching during a fetch, concurrent ordered reads), run the suite and build, inspect the diff.
 
-- [ ] (waiting on user: scripts/install.sh) Check in the running app: rings show at once on relaunch, readings.json exists, Codex does not blink on the 30 s tick, the Antigravity arc spins and stops.
+- [ ] Manual visual check: rings show at once on relaunch, Codex does not blink on the 30 s tick, and the Antigravity arc spins and stops. Installation and readings.json existence verified with v0.3.0.
 
 Verification: all 48 tests pass and swift build succeeds. The "Internal Error: DecodingError" build line also appears without this change.
 
@@ -41,5 +41,7 @@ Verification: all 56 tests pass, including kernel socket discovery and successfu
 
 ## Release and install
 - [x] Inspect changes and release history, choose version, and update release metadata.
-- [ ] Run checks, commit the release changes, and publish the tagged release with app archive.
-- [ ] Install the released build and verify its version and running process.
+- [x] Run checks, commit the release changes, and publish the tagged release with app archive.
+- [x] Install the released build and verify its version and running process.
+
+Verification: 56 tests pass; release commit 23c4a29 tagged v0.3.0 and published at https://github.com/thawee/TokenBar/releases/tag/v0.3.0 with the Apple Silicon app archive. Installed ~/Applications/TokenBar.app reports 0.3.0 (build 4), passes signature verification, matches the release binary, and is running. Reading cache exists. Evidence: /tmp/token-bar-release-tests.log, /tmp/token-bar-release-build.log, /tmp/token-bar-release-install.log, /tmp/token-bar-release-state.json.
